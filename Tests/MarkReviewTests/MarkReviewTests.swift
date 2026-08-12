@@ -106,6 +106,80 @@ func renumberTopDown() {
     #expect(document.annotations.map(\.sequence) == [1, 2])
 }
 
+@Test("renumbering recovers positions from rendered Markdown syntax")
+func renumberTopDownRecoversRenderedMarkdownPositions() {
+    let earlier = ReviewAnnotation(
+        sequence: 3,
+        kind: .text,
+        selectedText: "output actionable",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "output actionable",
+        section: "",
+        comment: "Earlier comment."
+    )
+    let inlineCode = ReviewAnnotation(
+        sequence: 2,
+        kind: .text,
+        selectedText: "Duplicating these values in .steam-mods.json creates another burden.",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "Duplicating these values in .steam-mods.json creates another burden.",
+        section: "",
+        comment: "Inline code comment."
+    )
+    let formattedHeading = ReviewAnnotation(
+        sequence: 1,
+        kind: .text,
+        selectedText: "6. Turn instructions into a concise exception file",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "6. Turn instructions into a concise exception file",
+        section: "",
+        comment: "Heading comment."
+    )
+    var document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: """
+        # Review
+
+        output actionable
+
+        Duplicating these values in \u{60}.steam-mods.json\u{60} creates another burden.
+
+        ### 6. **Turn instructions into a concise exception file**
+        """,
+        annotations: [formattedHeading, inlineCode, earlier]
+    )
+
+    document.renumberTopDown()
+
+    #expect(document.annotations.map(\.selectedText) == [
+        "output actionable",
+        "Duplicating these values in .steam-mods.json creates another burden.",
+        "6. Turn instructions into a concise exception file"
+    ])
+    #expect(document.annotations.map(\.sequence) == [1, 2, 3])
+}
+
+@Test("source line hints ignore Markdown syntax around a selection")
+func sourceLineHintsIgnoreMarkdownSyntax() {
+    let renderer = MarkdownRenderer()
+    let region = SelectedRegion(
+        kind: .text,
+        selectedText: "config.json",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "Use \u{60}config.json\u{60} for the review.",
+        section: ""
+    )
+
+    #expect(renderer.sourceLineHints(
+        for: region,
+        in: "# Review\n\nUse \u{60}config.json\u{60} for the review."
+    ) == (3, 3))
+}
+
 @Test("region updates preserve the existing annotation identity")
 func regionUpdatePreservesAnnotationIdentity() {
     let id = UUID()

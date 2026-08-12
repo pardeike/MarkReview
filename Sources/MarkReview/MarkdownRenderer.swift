@@ -10,50 +10,11 @@ struct MarkdownRenderer {
 
     func sourceLineHints(for region: SelectedRegion, in markdown: String) -> (Int?, Int?) {
         let candidates = [region.selectedText, region.blockText]
-            .map(Self.normalize)
-            .filter { !$0.isEmpty }
-
-        guard let candidate = candidates.first(where: { markdown.normalizedForReview.contains($0) }) else {
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard let location = candidates.compactMap({ ReviewSourceLocator.locate($0, in: markdown) }).first else {
             return (nil, nil)
         }
-
-        let normalizedMarkdown = markdown.normalizedForReview
-        guard let match = normalizedMarkdown.range(of: candidate) else {
-            return (nil, nil)
-        }
-        let startOffset = normalizedMarkdown.distance(from: normalizedMarkdown.startIndex, to: match.lowerBound)
-        let endOffset = normalizedMarkdown.distance(from: normalizedMarkdown.startIndex, to: match.upperBound)
-        let normalizedLines = markdown.components(separatedBy: .newlines)
-        var normalizedOffset = 0
-        var start: Int?
-        var end: Int?
-
-        for (index, line) in normalizedLines.enumerated() {
-            let lineLength = Self.normalize(line).count
-            let lineEnd = normalizedOffset + lineLength
-            if start == nil && startOffset <= lineEnd {
-                start = index + 1
-            }
-            if start != nil && endOffset <= lineEnd {
-                end = index + 1
-                break
-            }
-            normalizedOffset = lineEnd + 1
-        }
-
-        return (start, end ?? start)
-    }
-
-    private static func normalize(_ value: String) -> String {
-        value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
-private extension String {
-    var normalizedForReview: String {
-        replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (location.lineStart, location.lineEnd)
     }
 }
 
@@ -76,7 +37,8 @@ private enum HTMLPage {
         ul, ol { padding-left: 1.6em; } li { margin: .25em 0; }
         blockquote { border-left: 4px solid #c9cdd2; padding-left: 1em; color: #5f6368; }
         code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; color: #1f2937; background: #eef2f7; padding: .12em .3em; border-radius: 4px; }
-        pre { padding: 14px 16px; overflow-x: auto; border-radius: 8px; background: #eef2f7; color: #1f2937; }
+        pre { padding: 14px 16px; overflow: visible; border-radius: 8px; background: #eef2f7; color: #1f2937; }
+        pre > code { display: block; max-width: 100%; overflow-x: auto; }
         pre code { background: transparent; color: #1f2937; padding: 0; }
         table { border-collapse: collapse; width: 100%; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }

@@ -1,5 +1,84 @@
 import Foundation
 
+struct ReviewSourceLocation {
+    let lineStart: Int
+    let lineEnd: Int
+    let offset: Int
+}
+
+enum ReviewSourceLocator {
+    static func locate(_ text: String, in markdown: String) -> ReviewSourceLocation? {
+        let lines = markdown.components(separatedBy: .newlines)
+        let rawTarget = normalize(text)
+        guard !rawTarget.isEmpty else { return nil }
+
+        if let location = locate(
+            target: rawTarget,
+            lines: lines,
+            transform: { $0 }
+        ) {
+            return location
+        }
+
+        let displayTarget = normalize(stripMarkdownSyntax(text))
+        guard !displayTarget.isEmpty else { return nil }
+        return locate(
+            target: displayTarget,
+            lines: lines,
+            transform: stripMarkdownSyntax
+        )
+    }
+
+    private static func locate(
+        target: String,
+        lines: [String],
+        transform: (String) -> String
+    ) -> ReviewSourceLocation? {
+        var flattened = ""
+        var lineMap: [Int] = []
+
+        for (index, line) in lines.enumerated() {
+            let normalizedLine = normalize(transform(line))
+            guard !normalizedLine.isEmpty else { continue }
+            if !flattened.isEmpty {
+                flattened.append(" ")
+                lineMap.append(index + 1)
+            }
+            flattened.append(contentsOf: normalizedLine)
+            lineMap.append(contentsOf: repeatElement(index + 1, count: normalizedLine.count))
+        }
+
+        guard let match = flattened.range(of: target) else {
+            return nil
+        }
+        let startOffset = flattened.distance(from: flattened.startIndex, to: match.lowerBound)
+        let endOffset = flattened.distance(from: flattened.startIndex, to: match.upperBound)
+        guard startOffset < lineMap.count else { return nil }
+        let endIndex = min(max(endOffset - 1, startOffset), lineMap.count - 1)
+        return ReviewSourceLocation(
+            lineStart: lineMap[startOffset],
+            lineEnd: lineMap[endIndex],
+            offset: startOffset
+        )
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func stripMarkdownSyntax(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\x60{1,3}"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*|__|~~"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s{0,3}#{1,6}\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s{0,3}(?:[-+*]|\d+\.)\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s{0,3}>\s?"#, with: "", options: .regularExpression)
+    }
+}
+
 public enum AnnotationKind: String, Codable, CaseIterable {
     case text
     case block
@@ -146,11 +225,10 @@ public struct MarkReviewDocument: Codable, Equatable {
     }
 
     public mutating func renumberTopDown() {
-        let normalizedMarkdown = Self.normalizeForOrdering(originalMarkdown)
         var reordered = annotations
         reordered.sort { lhs, rhs in
-            let lhsPosition = Self.topDownPosition(for: lhs, in: normalizedMarkdown)
-            let rhsPosition = Self.topDownPosition(for: rhs, in: normalizedMarkdown)
+            let lhsPosition = Self.topDownPosition(for: lhs, in: originalMarkdown)
+            let rhsPosition = Self.topDownPosition(for: rhs, in: originalMarkdown)
             if lhsPosition != rhsPosition { return lhsPosition < rhsPosition }
             return lhs.sequence < rhs.sequence
         }
@@ -160,18 +238,13 @@ public struct MarkReviewDocument: Codable, Equatable {
         annotations = reordered
     }
 
-    private static func topDownPosition(for annotation: ReviewAnnotation, in normalizedMarkdown: String) -> (Int, Int) {
-        let line = annotation.sourceLineStart ?? Int.max
-        let selected = Self.normalizeForOrdering(annotation.selectedText)
-        let offset = selected.isEmpty ? Int.max : (normalizedMarkdown as NSString).range(of: selected).location
-        return (line, offset == NSNotFound ? Int.max : offset)
-    }
-
-    private static func normalizeForOrdering(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+    private static func topDownPosition(for annotation: ReviewAnnotation, in markdown: String) -> (Int, Int) {
+        let location = [annotation.selectedText, annotation.blockText]
+            .compactMap { ReviewSourceLocator.locate($0, in: markdown) }
+            .first
+        let line = location?.lineStart ?? annotation.sourceLineStart ?? Int.max
+        let offset = location?.offset ?? Int.max
+        return (line, offset)
     }
 }
 
