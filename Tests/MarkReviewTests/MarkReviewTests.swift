@@ -23,6 +23,7 @@ func documentRoundTrip() throws {
     let data = try JSONEncoder.markReview.encode(original)
     let decoded = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data)
     #expect(decoded.formatVersion == original.formatVersion)
+    #expect(decoded.id == original.id)
     #expect(decoded.title == original.title)
     #expect(decoded.sourcePath == original.sourcePath)
     #expect(decoded.originalMarkdown == original.originalMarkdown)
@@ -50,4 +51,19 @@ func agentExport() throws {
     #expect(export.annotations.first?.number == 3)
     #expect(export.annotations.first?.comment == "Make this actionable.")
     #expect(export.source.markdown == "# Heading\n\nText")
+}
+
+@Test("agent export omits an unfinished inline comment")
+func agentExportOmitsEmptyComments() {
+    let document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: "Text",
+        annotations: [
+            ReviewAnnotation(sequence: 1, kind: .text, selectedText: "Text", contextBefore: "", contextAfter: "", blockText: "Text", section: "", comment: "   "),
+            ReviewAnnotation(sequence: 2, kind: .text, selectedText: "Text", contextBefore: "", contextAfter: "", blockText: "Text", section: "", comment: "Keep this one.")
+        ]
+    )
+
+    let export = AgentExport(document: document)
+    #expect(export.annotations.map(\.number) == [2])
 }

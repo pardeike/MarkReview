@@ -33,11 +33,33 @@ swift run MarkReview
 
 ## Workflow
 
-1. Open MarkReview and choose **Import Markdown**.
-2. Select a sentence or paragraph in the rendered document.
-3. Click **Comment selection** and write an actionable note.
-4. Save the review as `Document.markreview`.
-5. Choose **Export Agent JSON** and give the exported JSON to the agent.
+1. Open a Markdown file with **File > Open…**, or use **File > Import Markdown…**
+   when you want to start a separate review copy.
+2. Select a sentence or paragraph in the rendered document. A numbered review
+   item appears immediately in the right sidebar and its remark field receives
+   focus, so you can start typing without a second dialog.
+3. If you change the selection before typing a remark, the pending item follows
+   the new selection. Once a remark contains text, it becomes a saved annotation
+   and a later selection starts the next numbered item.
+4. Click a review item to focus its remark and bring its highlighted passage
+   into view near the top quarter of the Markdown page. The matching blue
+   number is shown beside the passage on the left.
+5. Save the review as `Document.markreview`. MarkReview keeps the original
+   Markdown inside that document and never modifies the source `.md` file.
+6. Choose **File > Export Agent JSON…** and give the exported JSON to the
+   agent. Empty, unfinished items are not exported.
+
+MarkReview is a macOS document app: its open review documents are restored
+after the app is quit and relaunched, and each document's complete window frame
+(position and size) is remembered independently.
+
+MarkReview does not create a blank `Untitled` review window at launch. Start a
+review with **File > Open…** or **File > Import Markdown…**; **File > New** is
+available when a new empty review is intentionally wanted.
+
+The Markdown preview and comment list stay linked while you read. Scrolling
+the preview selects and reveals the nearby comment in the sidebar, and
+scrolling the sidebar brings the corresponding highlighted passage into view.
 
 The `.markreview` file is JSON rather than a binary container, so it remains
 inspectable, diffable, and easy to back up in iCloud. It is a separate copy of

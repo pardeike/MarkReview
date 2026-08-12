@@ -59,6 +59,7 @@ public struct ReviewAnnotation: Identifiable, Codable, Equatable {
 public struct MarkReviewDocument: Codable, Equatable {
     public static let currentFormatVersion = 1
 
+    public var id: UUID
     public var formatVersion: Int
     public var title: String
     public var sourcePath: String?
@@ -66,16 +67,37 @@ public struct MarkReviewDocument: Codable, Equatable {
     public var annotations: [ReviewAnnotation]
 
     public init(
+        id: UUID = UUID(),
         title: String = "Untitled review",
         sourcePath: String? = nil,
         originalMarkdown: String = "",
         annotations: [ReviewAnnotation] = []
     ) {
+        self.id = id
         self.formatVersion = Self.currentFormatVersion
         self.title = title
         self.sourcePath = sourcePath
         self.originalMarkdown = originalMarkdown
         self.annotations = annotations
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case formatVersion
+        case title
+        case sourcePath
+        case originalMarkdown
+        case annotations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion) ?? Self.currentFormatVersion
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Untitled review"
+        sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
+        originalMarkdown = try container.decodeIfPresent(String.self, forKey: .originalMarkdown) ?? ""
+        annotations = try container.decodeIfPresent([ReviewAnnotation].self, forKey: .annotations) ?? []
     }
 
     public var nextSequence: Int {
@@ -90,6 +112,11 @@ public struct MarkReviewDocument: Codable, Equatable {
     public mutating func toggleStatus(for id: UUID) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         annotations[index].status = annotations[index].status == .open ? .resolved : .open
+    }
+
+    public mutating func updateComment(for id: UUID, comment: String) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].comment = comment
     }
 
     public mutating func remove(id: UUID) {
@@ -137,6 +164,7 @@ public struct AgentExport: Codable {
             markdown: document.originalMarkdown
         )
         self.annotations = document.annotations
+            .filter { !$0.comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.sequence < $1.sequence }
             .map(AgentExportAnnotation.init)
     }

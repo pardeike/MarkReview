@@ -1,151 +1,266 @@
 import AppKit
 import SwiftUI
 
+private struct CommentFrame: Equatable {
+    let id: UUID
+    let minY: CGFloat
+}
+
+private struct CommentFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [CommentFrame] = []
+
+    static func reduce(value: inout [CommentFrame], nextValue: () -> [CommentFrame]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 struct ContentView: View {
     @Binding var document: MarkReviewDocument
-    @State private var selectedRegion: SelectedRegion?
-    @State private var showCommentEditor = false
-    @State private var statusMessage = ""
+    @State private var draftRegion: SelectedRegion?
+    @State private var draftID: UUID?
+    @State private var draftComment = ""
+    @State private var selectedAnnotationID: UUID?
+    @State private var sidebarTargetID: UUID?
+    @FocusState private var focusedComment: CommentFocus?
 
     private let renderer = MarkdownRenderer()
 
-    var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
+    private enum CommentFocus: Hashable {
+        case draft
+        case annotation(UUID)
+    }
 
+    var body: some View {
+        Group {
             if document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 emptyState
             } else {
                 HStack(spacing: 0) {
                     PreviewWebView(
                         html: renderer.render(document.originalMarkdown),
-                        annotations: document.annotations,
-                        onRegion: { region in
-                            selectedRegion = region
-                            showCommentEditor = true
-                        }
+                        annotations: previewAnnotations,
+                        onRegion: handleRegion,
+                        onFocusAnnotation: selectAnnotation,
+                        onVisibleAnnotation: handlePreviewVisibility,
+                        selectedAnnotationID: selectedAnnotationID
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     Divider()
                     sidebar
-                        .frame(width: 330)
+                        .frame(width: 350)
                 }
             }
         }
         .frame(minWidth: 980, minHeight: 680)
-        .sheet(isPresented: $showCommentEditor) {
-            if let selectedRegion {
-                CommentEditor(
-                    region: selectedRegion,
-                    sequence: document.nextSequence,
-                    onSave: { comment in
-                        addAnnotation(region: selectedRegion, comment: comment)
-                        showCommentEditor = false
-                        self.selectedRegion = nil
-                    },
-                    onCancel: {
-                        showCommentEditor = false
-                        self.selectedRegion = nil
-                    }
-                )
+        .navigationTitle(document.title)
+        .focusedSceneValue(\.markReviewActions, MarkReviewActions(
+            importMarkdown: importMarkdown,
+            exportAgentJSON: exportAgentJSON,
+            canExportAgentJSON: !document.originalMarkdown.isEmpty
+        ))
+        .background(WindowFrameObserver(identifier: document.id.uuidString))
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentImport)) { _ in
+            importMarkdown()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentExport)) { _ in
+            exportAgentJSON()
+        }
+        .onChange(of: focusedComment) { _, focus in
+            switch focus {
+            case .draft:
+                selectedAnnotationID = draftID
+            case .annotation(let id):
+                selectedAnnotationID = id
+            case nil:
+                break
             }
         }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            Text(document.title)
-                .font(.headline)
-                .lineLimit(1)
-            if !document.annotations.isEmpty {
-                Text("\(document.annotations.filter { $0.status == .open }.count) open")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !statusMessage.isEmpty {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Button("Import Markdown…", action: importMarkdown)
-            Button("Export Agent JSON…", action: exportAgentJSON)
-                .disabled(document.originalMarkdown.isEmpty)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    private var previewAnnotations: [ReviewAnnotation] {
+        guard let draftRegion, let draftID else { return document.annotations }
+        let draft = ReviewAnnotation(
+            id: draftID,
+            sequence: document.nextSequence,
+            kind: draftRegion.kind,
+            selectedText: draftRegion.selectedText,
+            contextBefore: draftRegion.contextBefore,
+            contextAfter: draftRegion.contextAfter,
+            blockText: draftRegion.blockText,
+            section: draftRegion.section,
+            comment: draftComment
+        )
+        return document.annotations + [draft]
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Review comments")
-                    .font(.headline)
-                Spacer()
-                Text("\(document.annotations.count)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
+            Text("Review comments")
+                .font(.headline)
+                .padding(14)
 
-            if document.annotations.isEmpty {
-                ContentUnavailableView("No comments yet", systemImage: "text.bubble", description: Text("Select text in the document or Option-click a block."))
+            if document.annotations.isEmpty && draftRegion == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No comments yet")
+                        .font(.headline)
+                    Text("Select text in the document or Option-click a block.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(14)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(document.annotations) { annotation in
-                            annotationCard(annotation)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            if let draftRegion, let draftID {
+                                draftCard(region: draftRegion, id: draftID)
+                            }
+                            ForEach($document.annotations) { $annotation in
+                                annotationCard($annotation)
+                            }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                    .coordinateSpace(name: "review-sidebar-scroll")
+                    .onPreferenceChange(CommentFramePreferenceKey.self) { frames in
+                        syncFromSidebarScroll(frames)
+                    }
+                    .onChange(of: sidebarTargetID) { _, targetID in
+                        guard let targetID else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
+                        sidebarTargetID = nil
+                    }
                 }
             }
         }
         .background(.bar)
     }
 
-    private func annotationCard(_ annotation: ReviewAnnotation) -> some View {
+    private func draftCard(region: SelectedRegion, id: UUID) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("#\(annotation.sequence)")
-                    .font(.caption.monospaced().weight(.bold))
-                    .foregroundStyle(annotation.status == .open ? .blue : .secondary)
-                Text(annotation.kind == .block ? "block" : "selection")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 9) {
+                numberBadge(document.nextSequence, selected: true)
+                Text("“\(region.selectedText)”")
+                    .font(.body.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(5)
                 Spacer()
-                Button(annotation.status == .open ? "Resolve" : "Reopen") {
-                    document.toggleStatus(for: annotation.id)
+            }
+            commentEditor(text: Binding(get: { draftComment }, set: updateDraftComment), placeholder: "Type your remark…")
+                .focused($focusedComment, equals: .draft)
+                .simultaneousGesture(TapGesture().onEnded { selectDraft(id: id) })
+        }
+        .padding(11)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.blue.opacity(0.32), lineWidth: 1))
+        .contentShape(Rectangle())
+        .id(id)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(
+                key: CommentFramePreferenceKey.self,
+                value: [CommentFrame(id: id, minY: geometry.frame(in: .named("review-sidebar-scroll")).minY)]
+            )
+        })
+        .onTapGesture { selectDraft(id: id) }
+    }
+
+    private func annotationCard(_ annotation: Binding<ReviewAnnotation>) -> some View {
+        let value = annotation.wrappedValue
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 9) {
+                numberBadge(value.sequence, selected: selectedAnnotationID == value.id)
+                Text("“\(value.selectedText)”")
+                    .font(.body.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(5)
+                Spacer(minLength: 0)
+            }
+            commentEditor(
+                text: Binding(
+                    get: { annotation.wrappedValue.comment },
+                    set: { document.updateComment(for: value.id, comment: $0) }
+                ),
+                placeholder: "Type your remark…"
+            )
+            .focused($focusedComment, equals: .annotation(value.id))
+            .simultaneousGesture(TapGesture().onEnded { selectAnnotation(value.id) })
+            HStack(spacing: 6) {
+                Spacer()
+                pillButton(value.status == .open ? "Resolve" : "Reopen") {
+                    document.toggleStatus(for: value.id)
                 }
-                .buttonStyle(.borderless)
-                .font(.caption)
-            }
-            if !annotation.section.isEmpty {
-                Text(annotation.section)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Text(annotation.comment)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("“\(annotation.selectedText)”")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
-            HStack {
-                Spacer()
-                Button("Delete") { document.remove(id: annotation.id) }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                pillButton("Delete") {
+                    document.remove(id: value.id)
+                    if selectedAnnotationID == value.id {
+                        selectedAnnotationID = nil
+                        focusedComment = nil
+                    }
+                }
             }
         }
         .padding(11)
-        .background(annotation.status == .open ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.blue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
+        .contentShape(Rectangle())
+        .id(value.id)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(
+                key: CommentFramePreferenceKey.self,
+                value: [CommentFrame(id: value.id, minY: geometry.frame(in: .named("review-sidebar-scroll")).minY)]
+            )
+        })
+        .onTapGesture { selectAnnotation(value.id) }
+    }
+
+    private func numberBadge(_ number: Int, selected: Bool) -> some View {
+        Text(String(number))
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 24, height: 24)
+            .background(Color.blue, in: Circle())
+            .overlay {
+                if selected {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.35), lineWidth: 3)
+                        .padding(-3)
+                }
+            }
+    }
+
+    private func commentEditor(text: Binding<String>, placeholder: String) -> some View {
+        ZStack(alignment: .topLeading) {
+            if text.wrappedValue.isEmpty {
+                Text(placeholder)
+                    .font(.body)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 7)
+                    .allowsHitTesting(false)
+            }
+            TextEditor(text: text)
+                .font(.body)
+                .frame(minHeight: 66, maxHeight: 120)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
+    }
+
+    private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.09), in: Capsule())
     }
 
     private var emptyState: some View {
@@ -155,19 +270,21 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Text("Start a Markdown review")
                 .font(.title2.weight(.semibold))
-            Text("Import a Markdown file, annotate passages, and export a numbered JSON review for your agent.")
+            Text("Open or import a Markdown file, annotate passages, and export a numbered JSON review for your agent.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)
-            Button("Import Markdown…", action: importMarkdown)
-                .buttonStyle(.borderedProminent)
+            Text("Use File > Open or File > Import Markdown… to begin.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func addAnnotation(region: SelectedRegion, comment: String) {
+    private func addAnnotation(region: SelectedRegion, comment: String, id: UUID = UUID()) -> UUID {
         let lines = renderer.sourceLineHints(for: region, in: document.originalMarkdown)
         let annotation = ReviewAnnotation(
+            id: id,
             sequence: document.nextSequence,
             kind: region.kind,
             selectedText: region.selectedText,
@@ -180,6 +297,74 @@ struct ContentView: View {
             sourceLineEnd: lines.1
         )
         document.add(annotation)
+        return id
+    }
+
+    private func handleRegion(_ region: SelectedRegion) {
+        if draftRegion != nil {
+            if draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.draftRegion = region
+                selectedAnnotationID = draftID
+                focusDraft()
+                return
+            }
+            _ = promoteDraft()
+        }
+        draftID = UUID()
+        draftRegion = region
+        draftComment = ""
+        selectedAnnotationID = draftID
+        focusDraft()
+    }
+
+    private func promoteDraft() -> UUID? {
+        guard let draftRegion, let draftID,
+              !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let id = addAnnotation(region: draftRegion, comment: draftComment, id: draftID)
+        self.draftRegion = nil
+        self.draftID = nil
+        self.draftComment = ""
+        selectedAnnotationID = id
+        focusedComment = .annotation(id)
+        return id
+    }
+
+    private func updateDraftComment(_ value: String) {
+        draftComment = value
+        if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _ = promoteDraft()
+        }
+    }
+
+    private func selectDraft(id: UUID) {
+        selectedAnnotationID = id
+        focusDraft()
+    }
+
+    private func selectAnnotation(_ id: UUID) {
+        selectedAnnotationID = id
+        focusedComment = .annotation(id)
+    }
+
+    private func handlePreviewVisibility(_ id: UUID) {
+        guard previewAnnotations.contains(where: { $0.id == id }) else { return }
+        selectedAnnotationID = id
+        sidebarTargetID = id
+    }
+
+    private func syncFromSidebarScroll(_ frames: [CommentFrame]) {
+        guard !frames.isEmpty else { return }
+        let target = frames.min { lhs, rhs in
+            abs(lhs.minY - 8) < abs(rhs.minY - 8)
+        }
+        guard let id = target?.id, selectedAnnotationID != id else { return }
+        selectedAnnotationID = id
+    }
+
+    private func focusDraft() {
+        DispatchQueue.main.async {
+            focusedComment = .draft
+        }
     }
 
     private func importMarkdown() {
@@ -195,9 +380,7 @@ struct ContentView: View {
                 sourcePath: url.path,
                 originalMarkdown: markdown
             )
-            statusMessage = "Imported"
         } catch {
-            statusMessage = "Could not read file"
         }
     }
 
@@ -209,9 +392,7 @@ struct ContentView: View {
         do {
             let data = try JSONEncoder.markReview.encode(AgentExport(document: document))
             try data.write(to: url, options: .atomic)
-            statusMessage = "Exported"
         } catch {
-            statusMessage = "Could not export JSON"
         }
     }
 }
