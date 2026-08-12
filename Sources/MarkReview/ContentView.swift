@@ -18,14 +18,120 @@ private struct CommentFramePreferenceKey: PreferenceKey {
     }
 }
 
+private enum SidebarScrollAnchor: Equatable {
+    case center
+    case bottom
+}
+
+private struct SidebarScrollRequest: Equatable {
+    let id: UUID
+    let anchor: SidebarScrollAnchor
+}
+
+private struct SidebarResizeHandle: View {
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+            Divider()
+        }
+        .frame(width: 8)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                NSCursor.resizeLeftRight.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
+private struct ReviewTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView()
+        textView.delegate = context.coordinator
+        textView.string = text
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+
+        guard isFocused, let window = scrollView.window else { return }
+        if window.firstResponder !== textView {
+            DispatchQueue.main.async {
+                window.makeFirstResponder(textView)
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ReviewTextEditor
+
+        init(_ parent: ReviewTextEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            parent.isFocused = true
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            parent.isFocused = false
+        }
+    }
+}
+
 struct ContentView: View {
     @Binding var document: MarkReviewDocument
     @State private var draftRegion: SelectedRegion?
     @State private var draftID: UUID?
     @State private var draftComment = ""
     @State private var selectedAnnotationID: UUID?
-    @State private var sidebarTargetID: UUID?
-    @FocusState private var focusedComment: CommentFocus?
+    @State private var sidebarScrollRequest: SidebarScrollRequest?
+    @State private var pendingBottomScrollID: UUID?
+    @State private var sidebarWidth: CGFloat = 350
+    @State private var sidebarDragStartWidth: CGFloat?
+    @State private var focusedComment: CommentFocus?
 
     private let renderer = MarkdownRenderer()
 
@@ -50,9 +156,20 @@ struct ContentView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    Divider()
+                    SidebarResizeHandle()
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    let startWidth = sidebarDragStartWidth ?? sidebarWidth
+                                    sidebarDragStartWidth = startWidth
+                                    sidebarWidth = min(max(startWidth - value.translation.width, 280), 560)
+                                }
+                                .onEnded { _ in
+                                    sidebarDragStartWidth = nil
+                                }
+                        )
                     sidebar
-                        .frame(width: 350)
+                        .frame(width: sidebarWidth)
                 }
             }
         }
@@ -136,12 +253,25 @@ struct ContentView: View {
                     .onPreferenceChange(CommentFramePreferenceKey.self) { frames in
                         syncFromSidebarScroll(frames)
                     }
-                    .onChange(of: sidebarTargetID) { _, targetID in
-                        guard let targetID else { return }
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(targetID, anchor: .center)
+                    .onChange(of: sidebarScrollRequest) { _, request in
+                        guard let request else { return }
+                        sidebarScrollRequest = nil
+                        let targetID = "annotation-\(request.id.uuidString)"
+                        let anchor: UnitPoint = request.anchor == .bottom ? .bottom : .center
+                        let scroll = {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(targetID, anchor: anchor)
+                            }
                         }
-                        sidebarTargetID = nil
+                        DispatchQueue.main.async {
+                            scroll()
+                            if request.anchor == .bottom {
+                                DispatchQueue.main.async {
+                                    scroll()
+                                    pendingBottomScrollID = nil
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -159,9 +289,11 @@ struct ContentView: View {
                     .lineLimit(5)
                 Spacer()
             }
-            commentEditor(text: Binding(get: { draftComment }, set: updateDraftComment), placeholder: "Type your remark…")
-                .focused($focusedComment, equals: .draft)
-                .simultaneousGesture(TapGesture().onEnded { selectDraft(id: id) })
+            commentEditor(
+                text: Binding(get: { draftComment }, set: updateDraftComment),
+                placeholder: "Type your remark…",
+                focus: .draft
+            )
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
@@ -193,10 +325,9 @@ struct ContentView: View {
                     get: { annotation.wrappedValue.comment },
                     set: { document.updateComment(for: value.id, comment: $0) }
                 ),
-                placeholder: "Type your remark…"
+                placeholder: "Type your remark…",
+                focus: .annotation(value.id)
             )
-            .focused($focusedComment, equals: .annotation(value.id))
-            .simultaneousGesture(TapGesture().onEnded { selectAnnotation(value.id) })
             HStack(spacing: 6) {
                 Spacer()
                 pillButton(value.status == .open ? "Resolve" : "Reopen") {
@@ -240,23 +371,30 @@ struct ContentView: View {
             }
     }
 
-    private func commentEditor(text: Binding<String>, placeholder: String) -> some View {
-        ZStack(alignment: .topLeading) {
+    private func commentEditor(text: Binding<String>, placeholder: String, focus: CommentFocus) -> some View {
+        let editorFocus = Binding<Bool>(
+            get: { focusedComment == focus },
+            set: { isFocused in
+                if isFocused {
+                    focusedComment = focus
+                } else if focusedComment == focus {
+                    focusedComment = nil
+                }
+            }
+        )
+
+        return ZStack(alignment: .topLeading) {
             if text.wrappedValue.isEmpty {
                 Text(placeholder)
                     .font(.body)
                     .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 0)
+                    .padding(8)
                     .allowsHitTesting(false)
             }
-            TextEditor(text: text)
-                .font(.body)
+            ReviewTextEditor(text: text, isFocused: editorFocus)
+                .padding(8)
                 .frame(minHeight: 66, maxHeight: 120)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
         }
-        .padding(3)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
     }
@@ -395,6 +533,8 @@ struct ContentView: View {
         self.draftComment = ""
         selectedAnnotationID = id
         focusedComment = .annotation(id)
+        pendingBottomScrollID = id
+        sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .bottom)
         return id
     }
 
@@ -411,6 +551,7 @@ struct ContentView: View {
     }
 
     private func selectAnnotation(_ id: UUID) {
+        pendingBottomScrollID = nil
         selectedAnnotationID = id
         focusedComment = .annotation(id)
     }
@@ -418,14 +559,15 @@ struct ContentView: View {
     private func renumberAnnotations() {
         document.renumberTopDown()
         if let selectedAnnotationID {
-            sidebarTargetID = selectedAnnotationID
+            sidebarScrollRequest = SidebarScrollRequest(id: selectedAnnotationID, anchor: .center)
         }
     }
 
     private func handlePreviewVisibility(_ id: UUID) {
+        guard pendingBottomScrollID == nil else { return }
         guard previewAnnotations.contains(where: { $0.id == id }) else { return }
         selectedAnnotationID = id
-        sidebarTargetID = id
+        sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .center)
     }
 
     private func syncFromSidebarScroll(_ frames: [CommentFrame]) {
