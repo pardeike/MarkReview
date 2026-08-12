@@ -99,7 +99,8 @@ struct PreviewWebView: NSViewRepresentable {
             guard isReady, let webView else { return }
             guard let data = try? JSONEncoder.markReview.encode(pendingAnnotations),
                   let json = String(data: data, encoding: .utf8) else { return }
-            webView.evaluateJavaScript("window.setAnnotations(\(json));")
+            let selectedID = pendingSelectedAnnotationID.map { "\"\($0.uuidString)\"" } ?? "null"
+            webView.evaluateJavaScript("window.setAnnotations(\(json), \(selectedID));")
         }
 
         func focusSelectedAnnotationWhenReady() {

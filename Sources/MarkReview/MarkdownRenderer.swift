@@ -214,10 +214,10 @@ private enum HTMLPage {
           addMarker(block, item, firstLine);
         }
 
-        window.setAnnotations = annotations => {
+        window.setAnnotations = (annotations, selectedID) => {
           clearHighlights();
           (annotations || []).forEach(item => highlight(item));
-          window.setSelectedAnnotation(window.selectedReviewAnnotationID || null);
+          window.setSelectedAnnotation(selectedID || null);
           notifyVisibleAnnotation();
         };
         window.selectedReviewAnnotationID = null;

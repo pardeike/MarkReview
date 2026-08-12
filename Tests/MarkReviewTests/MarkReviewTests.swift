@@ -105,3 +105,43 @@ func renumberTopDown() {
     #expect(document.annotations.map(\.selectedText) == ["First passage", "Second passage"])
     #expect(document.annotations.map(\.sequence) == [1, 2])
 }
+
+@Test("region updates preserve the existing annotation identity")
+func regionUpdatePreservesAnnotationIdentity() {
+    let id = UUID()
+    let annotation = ReviewAnnotation(
+        id: id,
+        sequence: 1,
+        kind: .text,
+        selectedText: "small part",
+        contextBefore: "before ",
+        contextAfter: " after",
+        blockText: "before small part after",
+        section: "Section",
+        comment: "Keep my remark.",
+        status: .resolved
+    )
+    var document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: "before small part after",
+        annotations: [annotation]
+    )
+
+    document.updateRegion(
+        for: id,
+        kind: .text,
+        selectedText: "before small part after",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "before small part after",
+        section: "Section",
+        sourceLineStart: 1,
+        sourceLineEnd: 1
+    )
+
+    #expect(document.annotations.first?.id == id)
+    #expect(document.annotations.first?.sequence == 1)
+    #expect(document.annotations.first?.comment == "Keep my remark.")
+    #expect(document.annotations.first?.status == .resolved)
+    #expect(document.annotations.first?.selectedText == "before small part after")
+}
