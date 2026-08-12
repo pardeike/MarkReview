@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import SwiftUI
 
 struct ReviewSourceLocation {
     let lineStart: Int
@@ -135,8 +137,16 @@ public struct ReviewAnnotation: Identifiable, Codable, Equatable {
     }
 }
 
-public struct MarkReviewDocument: Codable, Equatable {
+public final class MarkReviewDocument: Codable, Equatable, ObservableObject, ReferenceFileDocument, @unchecked Sendable {
     public static let currentFormatVersion = 1
+
+    // The editor intentionally does not publish document mutations. SwiftUI's
+    // DocumentGroup treats published reference-document changes as save-worthy;
+    // MarkReview owns its dirty state so closing can reliably offer Save,
+    // Don't Save, or Cancel before any file write occurs.
+    public let objectWillChange = ObservableObjectPublisher()
+
+    public typealias Snapshot = MarkReviewDocument
 
     public var id: UUID
     public var formatVersion: Int
@@ -183,22 +193,22 @@ public struct MarkReviewDocument: Codable, Equatable {
         (annotations.map(\.sequence).max() ?? 0) + 1
     }
 
-    public mutating func add(_ annotation: ReviewAnnotation) {
+    public func add(_ annotation: ReviewAnnotation) {
         annotations.append(annotation)
         annotations.sort { $0.sequence < $1.sequence }
     }
 
-    public mutating func toggleStatus(for id: UUID) {
+    public func toggleStatus(for id: UUID) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         annotations[index].status = annotations[index].status == .open ? .resolved : .open
     }
 
-    public mutating func updateComment(for id: UUID, comment: String) {
+    public func updateComment(for id: UUID, comment: String) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         annotations[index].comment = comment
     }
 
-    public mutating func updateRegion(
+    public func updateRegion(
         for id: UUID,
         kind: AnnotationKind,
         selectedText: String,
@@ -220,7 +230,7 @@ public struct MarkReviewDocument: Codable, Equatable {
         annotations[index].sourceLineEnd = sourceLineEnd
     }
 
-    public mutating func remove(id: UUID) {
+    public func remove(id: UUID) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         let removedSequence = annotations[index].sequence
         annotations.remove(at: index)
@@ -229,7 +239,7 @@ public struct MarkReviewDocument: Codable, Equatable {
         }
     }
 
-    public mutating func renumberTopDown() {
+    public func renumberTopDown() {
         var reordered = annotations
         reordered.sort { lhs, rhs in
             let lhsPosition = Self.topDownPosition(for: lhs, in: originalMarkdown)
@@ -241,6 +251,36 @@ public struct MarkReviewDocument: Codable, Equatable {
             reordered[index].sequence = index + 1
         }
         annotations = reordered
+    }
+
+    public func replace(with replacement: MarkReviewDocument) {
+        id = replacement.id
+        formatVersion = replacement.formatVersion
+        title = replacement.title
+        sourcePath = replacement.sourcePath
+        originalMarkdown = replacement.originalMarkdown
+        annotations = replacement.annotations
+    }
+
+    public func copy() -> MarkReviewDocument {
+        let copied = MarkReviewDocument(
+            id: id,
+            title: title,
+            sourcePath: sourcePath,
+            originalMarkdown: originalMarkdown,
+            annotations: annotations
+        )
+        copied.formatVersion = formatVersion
+        return copied
+    }
+
+    public static func == (lhs: MarkReviewDocument, rhs: MarkReviewDocument) -> Bool {
+        lhs.id == rhs.id
+            && lhs.formatVersion == rhs.formatVersion
+            && lhs.title == rhs.title
+            && lhs.sourcePath == rhs.sourcePath
+            && lhs.originalMarkdown == rhs.originalMarkdown
+            && lhs.annotations == rhs.annotations
     }
 
     private static func topDownPosition(for annotation: ReviewAnnotation, in markdown: String) -> (Int, Int) {

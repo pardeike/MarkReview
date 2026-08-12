@@ -32,9 +32,9 @@ private enum HTMLPage {
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
-        :root { color-scheme: light dark; }
+        :root { --markdown-font-scale: 1; color-scheme: light dark; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: 16px; line-height: 1.58; color: #202124; background: #fff; }
+        body { margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: calc(16px * var(--markdown-font-scale)); line-height: 1.58; color: #202124; background: #fff; }
         @media (prefers-color-scheme: dark) { body { color: #f1f3f4; background: #202124; } a { color: #8ab4f8; } code { background: #303134; color: #f8fafc; } pre, pre code { background: #111827; color: #f8fafc; } blockquote { border-color: #777; color: #c5c7c9; } }
         #document { max-width: 900px; margin: 0 auto; }
         h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 1.5em 0 .55em; letter-spacing: -.015em; }
@@ -58,7 +58,7 @@ private enum HTMLPage {
         .review-marker:hover { z-index: 100; transform: translateX(var(--stack-offset, 0px)) scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.28); }
         .review-marker.review-selected:hover { box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 2px 6px rgba(0,0,0,.28); }
         .review-marker.review-resolved { background: #94a3b8; }
-        #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: 12px; pointer-events: none; }
+        #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: calc(12px * var(--markdown-font-scale)); pointer-events: none; }
       </style>
     </head>
     <body>
@@ -124,7 +124,7 @@ private enum HTMLPage {
           review()?.postMessage({ type: 'region', ...region });
         }
 
-        document.addEventListener('mouseup', event => {
+        function emitSelection(event) {
           const element = event.target.closest?.('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,td,th');
           if (!element || !root.contains(element)) return;
           const selection = window.getSelection();
@@ -144,7 +144,9 @@ private enum HTMLPage {
           const region = { kind: 'text', selectedText: text, blockText, section, ...contextForSelection(block, selectionRange) };
           selection.removeAllRanges();
           send(region);
-        });
+        }
+
+        document.addEventListener('mouseup', emitSelection);
 
         function clearHighlights() {
           reviewRanges.clear();
@@ -371,6 +373,12 @@ private enum HTMLPage {
           if (!target) return;
           const rect = target.getBoundingClientRect();
           window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: 'smooth' });
+        };
+
+        window.setMarkdownFontScale = scale => {
+          const normalized = Math.min(2, Math.max(0.75, Number(scale) || 1));
+          document.documentElement.style.setProperty('--markdown-font-scale', normalized);
+          window.requestAnimationFrame(redrawOutlines);
         };
 
         window.addEventListener('scroll', () => {

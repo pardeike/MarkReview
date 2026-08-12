@@ -6,7 +6,7 @@ extension UTType {
     static let markReview = UTType(exportedAs: "com.markreview.document", conformingTo: .json)
 }
 
-extension MarkReviewDocument: FileDocument {
+extension MarkReviewDocument {
     public static var readableContentTypes: [UTType] {
         [.markReview, .plainText, .text]
     }
@@ -15,26 +15,31 @@ extension MarkReviewDocument: FileDocument {
         [.markReview, .plainText, .text]
     }
 
-    public init(configuration: ReadConfiguration) throws {
+    public convenience init(configuration: FileDocumentReadConfiguration) throws {
         let data = configuration.file.regularFileContents ?? Data()
         if let decoded = try? JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data) {
-            self = decoded
+            self.init()
+            replace(with: decoded)
         } else if let markdown = String(data: data, encoding: .utf8) {
             let filename = configuration.file.preferredFilename ?? configuration.file.filename
             let title = filename.map {
                 URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent
             } ?? "Untitled review"
-            self = MarkReviewDocument(title: title, sourcePath: filename, originalMarkdown: markdown)
+            self.init(title: title, sourcePath: filename, originalMarkdown: markdown)
         } else {
             throw CocoaError(.fileReadCorruptFile)
         }
     }
 
-    public func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    public func snapshot(contentType: UTType) throws -> MarkReviewDocument {
+        copy()
+    }
+
+    public func fileWrapper(snapshot: MarkReviewDocument, configuration: FileDocumentWriteConfiguration) throws -> FileWrapper {
         if configuration.contentType.conforms(to: .plainText) {
-            return FileWrapper(regularFileWithContents: Data(originalMarkdown.utf8))
+            return FileWrapper(regularFileWithContents: Data(snapshot.originalMarkdown.utf8))
         }
-        let data = try JSONEncoder.markReview.encode(self)
+        let data = try JSONEncoder.markReview.encode(snapshot)
         return FileWrapper(regularFileWithContents: data)
     }
 }

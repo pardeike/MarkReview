@@ -18,6 +18,8 @@ private struct SidebarScrollRequest: Equatable {
     let anchor: SidebarScrollAnchor
 }
 
+private let sidebarBottomAnchor = "sidebar-bottom-anchor"
+
 private struct SidebarResizeHandle: View {
     var body: some View {
         ZStack {
@@ -40,6 +42,25 @@ private struct SidebarResizeHandle: View {
 private struct ReviewTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    let focusToken: Int
+
+    private final class FocusableTextView: NSTextView {
+        var shouldBecomeFirstResponder = false
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            requestFirstResponderIfNeeded()
+        }
+
+        func requestFirstResponderIfNeeded() {
+            guard shouldBecomeFirstResponder, let window else { return }
+            guard window.firstResponder !== self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.shouldBecomeFirstResponder, let window = self.window else { return }
+                window.makeFirstResponder(self)
+            }
+        }
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -53,7 +74,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
 
-        let textView = NSTextView()
+        let textView = FocusableTextView()
         textView.delegate = context.coordinator
         textView.string = text
         textView.isRichText = false
@@ -76,21 +97,23 @@ private struct ReviewTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? FocusableTextView else { return }
         if textView.string != text {
             textView.string = text
         }
 
-        guard isFocused, let window = scrollView.window else { return }
-        if window.firstResponder !== textView {
-            DispatchQueue.main.async {
-                window.makeFirstResponder(textView)
+        textView.shouldBecomeFirstResponder = isFocused
+        if isFocused {
+            if context.coordinator.lastFocusToken != focusToken {
+                context.coordinator.lastFocusToken = focusToken
             }
+            textView.requestFirstResponderIfNeeded()
         }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ReviewTextEditor
+        var lastFocusToken: Int?
 
         init(_ parent: ReviewTextEditor) {
             self.parent = parent
@@ -112,7 +135,14 @@ private struct ReviewTextEditor: NSViewRepresentable {
 }
 
 struct ContentView: View {
-    @Binding var document: MarkReviewDocument
+    private static let minimumPreviewFontScale = 0.75
+    private static let maximumPreviewFontScale = 2.0
+    private static let previewFontScaleStep = 0.1
+    private static let defaultPreviewFontScale = 1.0
+
+    @ObservedObject var document: MarkReviewDocument
+    private let fileURL: URL?
+    @State private var documentRevision = 0
     @State private var draftRegion: SelectedRegion?
     @State private var draftID: UUID?
     @State private var draftComment = ""
@@ -122,8 +152,11 @@ struct ContentView: View {
     @State private var sidebarWidth: CGFloat = 350
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var focusedComment: CommentFocus?
+    @State private var commentFocusToken = 0
     @State private var nextPreviewFocusToken = 0
     @State private var previewFocusRequest: PreviewFocusRequest?
+    @State private var isSidebarVisible: Bool
+    @State private var previewFontScale = ContentView.defaultPreviewFontScale
 
     private let renderer = MarkdownRenderer()
 
@@ -132,7 +165,20 @@ struct ContentView: View {
         case annotation(UUID)
     }
 
+    init(document: MarkReviewDocument, fileURL: URL?) {
+        self.document = document
+        self.fileURL = fileURL
+        let hasMarkdown = !document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let shouldShowForDocumentType = !Self.isMarkdownOnly(fileURL) || !document.annotations.isEmpty
+        _isSidebarVisible = State(initialValue: hasMarkdown && shouldShowForDocumentType)
+    }
+
+    private static func isMarkdownOnly(_ fileURL: URL?) -> Bool {
+        fileURL?.pathExtension.caseInsensitiveCompare("md") == .orderedSame
+    }
+
     var body: some View {
+        let _ = documentRevision
         Group {
             if document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 emptyState
@@ -140,28 +186,32 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     PreviewWebView(
                         html: renderer.render(document.originalMarkdown),
+                        fontScale: previewFontScale,
                         annotations: previewAnnotations,
                         onRegion: handleRegion,
                         onFocusAnnotation: selectAnnotationFromPreview,
                         selectedAnnotationID: selectedAnnotationID,
-                        focusRequest: previewFocusRequest
+                        focusRequest: previewFocusRequest,
+                        onZoomScroll: adjustPreviewFontScale
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    SidebarResizeHandle()
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    let startWidth = sidebarDragStartWidth ?? sidebarWidth
-                                    sidebarDragStartWidth = startWidth
-                                    sidebarWidth = min(max(startWidth - value.translation.width, 280), 560)
-                                }
-                                .onEnded { _ in
-                                    sidebarDragStartWidth = nil
-                                }
-                        )
-                    sidebar
-                        .frame(width: sidebarWidth)
+                    if isSidebarVisible {
+                        SidebarResizeHandle()
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let startWidth = sidebarDragStartWidth ?? sidebarWidth
+                                        sidebarDragStartWidth = startWidth
+                                        sidebarWidth = min(max(startWidth - value.translation.width, 280), 560)
+                                    }
+                                    .onEnded { _ in
+                                        sidebarDragStartWidth = nil
+                                    }
+                            )
+                        sidebar
+                            .frame(width: sidebarWidth)
+                    }
                 }
             }
         }
@@ -169,24 +219,41 @@ struct ContentView: View {
         .tint(Color(nsColor: NSColor.controlAccentColor))
         .navigationTitle(document.title)
         .focusedSceneValue(\.markReviewActions, MarkReviewActions(
-            importMarkdown: importMarkdown,
+            saveDocument: saveDocument,
+            closeWindow: closeWindow,
             exportAgentJSON: exportAgentJSON,
             renumberAnnotations: renumberAnnotations,
-            closeWithoutSaving: closeWithoutSaving,
+            toggleSidebar: toggleSidebar,
+            isSidebarVisible: isSidebarVisible,
+            zoomInPreview: zoomInPreview,
+            zoomOutPreview: zoomOutPreview,
+            resetPreviewZoom: resetPreviewZoom,
+            canZoomInPreview: canZoomInPreview,
+            canZoomOutPreview: canZoomOutPreview,
+            isPreviewAtActualSize: isPreviewAtActualSize,
             canExportAgentJSON: !document.originalMarkdown.isEmpty
         ))
-        .background(WindowFrameObserver(identifier: document.id.uuidString))
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentImport)) { _ in
-            importMarkdown()
-        }
+        .background(WindowFrameObserver(
+            identifier: document.id.uuidString,
+            prepareForSave: prepareDraftForSave
+        ))
         .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentExport)) { _ in
             exportAgentJSON()
         }
         .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentRenumber)) { _ in
             renumberAnnotations()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentCloseWithoutSaving)) { _ in
-            closeWithoutSaving()
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentToggleSidebar)) { _ in
+            toggleSidebar()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentZoomIn)) { _ in
+            zoomInPreview()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentZoomOut)) { _ in
+            zoomOutPreview()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentResetPreviewZoom)) { _ in
+            resetPreviewZoom()
         }
         .onChange(of: focusedComment) { _, focus in
             switch focus {
@@ -235,49 +302,30 @@ struct ContentView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach($document.annotations) { $annotation in
-                                annotationCard($annotation)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(document.annotations) { annotation in
+                                annotationCard(annotation)
                             }
                             if let draftRegion, let draftID {
                                 draftCard(region: draftRegion, id: draftID)
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(sidebarBottomAnchor)
                         }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                     }
                     .onChange(of: sidebarScrollRequest) { _, request in
                         guard let request else { return }
-                        sidebarScrollRequest = nil
-                        let targetID = request.id == draftID
-                            ? "draft-\(request.id.uuidString)"
-                            : "annotation-\(request.id.uuidString)"
-                        let anchor: UnitPoint
-                        switch request.anchor {
-                        case .top:
-                            anchor = .top
-                        case .center:
-                            anchor = .center
-                        case .bottom:
-                            anchor = .bottom
-                        }
-                        let scroll = {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(targetID, anchor: anchor)
-                            }
-                        }
-                        DispatchQueue.main.async {
-                            scroll()
-                            if request.anchor == .bottom {
-                                DispatchQueue.main.async {
-                                    scroll()
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                        if pendingBottomScrollID == request.id {
-                                            pendingBottomScrollID = nil
-                                        }
-                                    }
-                                }
-                            }
+                        scrollSidebar(request, using: proxy)
+                    }
+                    .onAppear {
+                        // A new markdown document inserts this whole reader when the
+                        // first selection opens the sidebar. In that case the request
+                        // can exist before this change handler is installed.
+                        if let request = sidebarScrollRequest {
+                            scrollSidebar(request, using: proxy)
                         }
                     }
                 }
@@ -300,6 +348,7 @@ struct ContentView: View {
                 text: Binding(get: { draftComment }, set: updateDraftComment),
                 placeholder: "Type your remark…",
                 focus: .draft,
+                focusToken: commentFocusToken,
                 onFocus: {
                     selectedAnnotationID = id
                     requestPreviewFocus(id)
@@ -314,8 +363,7 @@ struct ContentView: View {
         .onTapGesture { selectDraft(id: id) }
     }
 
-    private func annotationCard(_ annotation: Binding<ReviewAnnotation>) -> some View {
-        let value = annotation.wrappedValue
+    private func annotationCard(_ value: ReviewAnnotation) -> some View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 9) {
                 numberBadge(value.sequence, selected: selectedAnnotationID == value.id)
@@ -327,11 +375,12 @@ struct ContentView: View {
             }
             commentEditor(
                 text: Binding(
-                    get: { annotation.wrappedValue.comment },
-                    set: { document.updateComment(for: value.id, comment: $0) }
+                    get: { document.annotations.first(where: { $0.id == value.id })?.comment ?? value.comment },
+                    set: { updateComment(for: value.id, comment: $0) }
                 ),
                 placeholder: "Type your remark…",
                 focus: .annotation(value.id),
+                focusToken: commentFocusToken,
                 onFocus: {
                     selectedAnnotationID = value.id
                     requestPreviewFocus(value.id)
@@ -340,10 +389,10 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Spacer()
                 pillButton(value.status == .open ? "Resolve" : "Reopen") {
-                    document.toggleStatus(for: value.id)
+                    toggleStatus(for: value.id)
                 }
                 pillButton("Delete") {
-                    document.remove(id: value.id)
+                    removeAnnotation(id: value.id)
                     if selectedAnnotationID == value.id {
                         selectedAnnotationID = nil
                         focusedComment = nil
@@ -378,6 +427,7 @@ struct ContentView: View {
         text: Binding<String>,
         placeholder: String,
         focus: CommentFocus,
+        focusToken: Int,
         onFocus: @escaping () -> Void
     ) -> some View {
         let editorFocus = Binding<Bool>(
@@ -400,7 +450,7 @@ struct ContentView: View {
                     .padding(8)
                     .allowsHitTesting(false)
             }
-            ReviewTextEditor(text: text, isFocused: editorFocus)
+            ReviewTextEditor(text: text, isFocused: editorFocus, focusToken: focusToken)
                 .padding(8)
                 .frame(minHeight: 66, maxHeight: 120)
         }
@@ -425,11 +475,11 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Text("Start a Markdown review")
                 .font(.title2.weight(.semibold))
-            Text("Open or import a Markdown file, annotate passages, and export a numbered JSON review for your agent.")
+            Text("Open a Markdown file, annotate passages, and export a numbered JSON review for your agent.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)
-            Text("Use File > Open or File > Import Markdown… to begin.")
+            Text("Use File > Open to begin.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -451,11 +501,15 @@ struct ContentView: View {
             sourceLineStart: lines.0,
             sourceLineEnd: lines.1
         )
-        document.add(annotation)
+        mutateDocument { document in
+            document.add(annotation)
+        }
         return id
     }
 
     private func handleRegion(_ region: SelectedRegion) {
+        isSidebarVisible = true
+
         if let overlappingID = overlappingAnnotationID(for: region) {
             if draftRegion != nil, !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 _ = promoteDraft()
@@ -492,17 +546,19 @@ struct ContentView: View {
 
     private func updateAnnotationRegion(_ id: UUID, with region: SelectedRegion) {
         let lines = renderer.sourceLineHints(for: region, in: document.originalMarkdown)
-        document.updateRegion(
-            for: id,
-            kind: region.kind,
-            selectedText: region.selectedText,
-            contextBefore: region.contextBefore,
-            contextAfter: region.contextAfter,
-            blockText: region.blockText,
-            section: region.section,
-            sourceLineStart: lines.0,
-            sourceLineEnd: lines.1
-        )
+        mutateDocument { document in
+            document.updateRegion(
+                for: id,
+                kind: region.kind,
+                selectedText: region.selectedText,
+                contextBefore: region.contextBefore,
+                contextAfter: region.contextAfter,
+                blockText: region.blockText,
+                section: region.section,
+                sourceLineStart: lines.0,
+                sourceLineEnd: lines.1
+            )
+        }
     }
 
     private func overlappingAnnotationID(for region: SelectedRegion) -> UUID? {
@@ -514,11 +570,14 @@ struct ContentView: View {
             let existingSelection = normalizeForOverlap(annotation.selectedText)
             guard !existingSelection.isEmpty else { return false }
 
+            let existingBlock = normalizeForOverlap(annotation.blockText)
+            let hasComparableBlocks = !newBlock.isEmpty && !existingBlock.isEmpty
+            guard !hasComparableBlocks || existingBlock == newBlock else { return false }
+
             if newSelection.contains(existingSelection) || existingSelection.contains(newSelection) {
                 return true
             }
 
-            let existingBlock = normalizeForOverlap(annotation.blockText)
             guard !newBlock.isEmpty, existingBlock == newBlock else { return false }
             let block = newBlock as NSString
             let existingRange = block.range(of: existingSelection)
@@ -556,7 +615,7 @@ struct ContentView: View {
     private func updateDraftComment(_ value: String) {
         draftComment = value
         if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            _ = promoteDraft()
+            MarkReviewDocumentChangeState.shared.markDirty(document.id)
         }
     }
 
@@ -577,7 +636,50 @@ struct ContentView: View {
         sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .bottom)
     }
 
+    private func scrollSidebar(_ request: SidebarScrollRequest, using proxy: ScrollViewProxy) {
+        let targetID = request.anchor == .bottom
+            ? sidebarBottomAnchor
+            : (request.id == draftID
+                ? "draft-\(request.id.uuidString)"
+                : "annotation-\(request.id.uuidString)")
+        let anchor: UnitPoint
+        switch request.anchor {
+        case .top:
+            anchor = .top
+        case .center:
+            anchor = .center
+        case .bottom:
+            anchor = .bottom
+        }
+
+        let scroll = {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(targetID, anchor: anchor)
+            }
+        }
+
+        // Keep the request alive until the inserted card and its bottom anchor have
+        // participated in layout. This is important when this reader was just
+        // inserted by the first selection in a markdown-only document.
+        DispatchQueue.main.async {
+            scroll()
+            DispatchQueue.main.async {
+                scroll()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    guard sidebarScrollRequest == request else { return }
+                    sidebarScrollRequest = nil
+                    if pendingBottomScrollID == request.id {
+                        pendingBottomScrollID = nil
+                    }
+                }
+            }
+        }
+    }
+
     private func selectAnnotation(_ id: UUID) {
+        if draftCommentHasContent {
+            _ = promoteDraft()
+        }
         pendingBottomScrollID = nil
         selectedAnnotationID = id
         requestPreviewFocus(id)
@@ -590,32 +692,42 @@ struct ContentView: View {
     }
 
     private func renumberAnnotations() {
-        document.renumberTopDown()
+        mutateDocument { document in
+            document.renumberTopDown()
+        }
         if let selectedAnnotationID {
             sidebarScrollRequest = SidebarScrollRequest(id: selectedAnnotationID, anchor: .center)
         }
     }
 
     private func focusDraft() {
+        commentFocusToken &+= 1
         DispatchQueue.main.async {
             focusedComment = .draft
         }
     }
 
-    private func importMarkdown() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.plainText, .text]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let markdown = try String(contentsOf: url, encoding: .utf8)
-            document = MarkReviewDocument(
-                title: url.deletingPathExtension().lastPathComponent,
-                sourcePath: url.path,
-                originalMarkdown: markdown
+    private var draftCommentHasContent: Bool {
+        !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func prepareDraftForSave() {
+        guard draftCommentHasContent else { return }
+        _ = promoteDraft()
+    }
+
+    private func saveDocument() {
+        prepareDraftForSave()
+        guard let nativeDocument = activeNativeDocument() else { return }
+        let window = nativeDocument.windowControllers.first { $0.window?.isKeyWindow == true }?.window
+        if let closeGuard = window?.delegate as? ReviewWindowCloseGuard {
+            closeGuard.save(nativeDocument)
+        } else {
+            nativeDocument.save(
+                withDelegate: DocumentSaveDelegate(documentID: document.id),
+                didSave: #selector(DocumentSaveDelegate.documentDidSave(_:didSave:contextInfo:)),
+                contextInfo: nil
             )
-        } catch {
         }
     }
 
@@ -631,13 +743,81 @@ struct ContentView: View {
         }
     }
 
-    private func closeWithoutSaving() {
-        let document = NSDocumentController.shared.currentDocument
-            ?? NSDocumentController.shared.documents.first { document in
-                document.windowControllers.contains { $0.window?.isKeyWindow == true }
-            }
-        guard let document else { return }
-        document.updateChangeCount(.changeCleared)
-        document.close()
+    private func closeWindow() {
+        let window = activeNativeDocument()?.windowControllers.first { $0.window?.isKeyWindow == true }?.window
+            ?? NSApp.keyWindow
+        window?.performClose(nil)
+    }
+
+    private func toggleSidebar() {
+        isSidebarVisible.toggle()
+    }
+
+    private var canZoomInPreview: Bool {
+        previewFontScale < Self.maximumPreviewFontScale - 0.001
+    }
+
+    private var canZoomOutPreview: Bool {
+        previewFontScale > Self.minimumPreviewFontScale + 0.001
+    }
+
+    private var isPreviewAtActualSize: Bool {
+        abs(previewFontScale - Self.defaultPreviewFontScale) < 0.001
+    }
+
+    private func zoomInPreview() {
+        adjustPreviewFontScale(1)
+    }
+
+    private func zoomOutPreview() {
+        adjustPreviewFontScale(-1)
+    }
+
+    private func resetPreviewZoom() {
+        previewFontScale = Self.defaultPreviewFontScale
+    }
+
+    private func adjustPreviewFontScale(_ steps: CGFloat) {
+        let nextScale = previewFontScale + (steps * Self.previewFontScaleStep)
+        previewFontScale = min(
+            max(nextScale, Self.minimumPreviewFontScale),
+            Self.maximumPreviewFontScale
+        )
+    }
+
+    private func updateComment(for id: UUID, comment: String) {
+        mutateDocument { document in
+            document.updateComment(for: id, comment: comment)
+        }
+    }
+
+    private func toggleStatus(for id: UUID) {
+        mutateDocument { document in
+            document.toggleStatus(for: id)
+        }
+    }
+
+    private func removeAnnotation(id: UUID) {
+        mutateDocument { document in
+            document.remove(id: id)
+        }
+    }
+
+    private func mutateDocument(_ mutation: (MarkReviewDocument) -> Void) {
+        let previousDocument = document.copy()
+        mutation(document)
+        guard document != previousDocument else { return }
+        markDocumentEdited()
+    }
+
+    private func markDocumentEdited() {
+        MarkReviewDocumentChangeState.shared.markDirty(document.id)
+        documentRevision &+= 1
+    }
+
+    private func activeNativeDocument() -> NSDocument? {
+        NSDocumentController.shared.documents.first { document in
+            document.windowControllers.contains { $0.window?.isKeyWindow == true }
+        } ?? NSDocumentController.shared.currentDocument
     }
 }

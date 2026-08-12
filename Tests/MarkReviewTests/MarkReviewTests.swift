@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import Combine
 import Testing
 @testable import MarkReview
 
@@ -94,7 +96,7 @@ func renumberTopDown() {
         sourceLineStart: 7,
         sourceLineEnd: 7
     )
-    var document = MarkReviewDocument(
+    let document = MarkReviewDocument(
         title: "Review",
         originalMarkdown: "# First\n\nFirst passage\n\n# Second\n\nSecond passage",
         annotations: [second, first]
@@ -111,7 +113,7 @@ func deletingAnnotationClosesSequenceGapWithoutReordering() {
     let firstID = UUID()
     let deletedID = UUID()
     let lastID = UUID()
-    var document = MarkReviewDocument(
+    let document = MarkReviewDocument(
         title: "Review",
         originalMarkdown: "First\n\nSecond\n\nThird",
         annotations: [
@@ -160,7 +162,7 @@ func renumberTopDownRecoversRenderedMarkdownPositions() {
         section: "",
         comment: "Heading comment."
     )
-    var document = MarkReviewDocument(
+    let document = MarkReviewDocument(
         title: "Review",
         originalMarkdown: """
         # Review
@@ -230,6 +232,15 @@ func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
     #expect(rendered.contains("expectedAfter && candidateAfter.startsWith(expectedAfter)"))
 }
 
+@Test("preview supports runtime font scaling without replacing the document")
+func previewSupportsRuntimeFontScaling() {
+    let rendered = MarkdownRenderer().render("# Review")
+
+    #expect(rendered.contains("--markdown-font-scale: 1"))
+    #expect(rendered.contains("font-size: calc(16px * var(--markdown-font-scale))"))
+    #expect(rendered.contains("window.setMarkdownFontScale = scale"))
+}
+
 @Test("preview stacks same-row review markers for hover inspection")
 func previewStacksSameRowReviewMarkersForHoverInspection() {
     let rendered = MarkdownRenderer().render("First repeated text")
@@ -253,6 +264,99 @@ func previewUsesSystemAccentColor() {
     #expect(!rendered.contains("rgba(0, 122, 255"))
 }
 
+@Test("document change state tracks edits until explicitly cleared")
+@MainActor
+func documentChangeStateTracksEditsUntilExplicitlyCleared() {
+    let id = UUID()
+    let state = MarkReviewDocumentChangeState.shared
+
+    #expect(!state.isDirty(id))
+    state.markDirty(id)
+    #expect(state.isDirty(id))
+    state.clear(id)
+    #expect(!state.isDirty(id))
+}
+
+@Test("reference document snapshots are detached from later edits")
+func referenceDocumentSnapshotsAreDetachedFromLaterEdits() throws {
+    let id = UUID()
+    let document = MarkReviewDocument(
+        id: id,
+        title: "Review",
+        originalMarkdown: "Text",
+        annotations: [ReviewAnnotation(
+            id: UUID(),
+            sequence: 1,
+            kind: .text,
+            selectedText: "Text",
+            contextBefore: "",
+            contextAfter: "",
+            blockText: "Text",
+            section: "",
+            comment: "Before"
+        )]
+    )
+
+    let snapshot = try document.snapshot(contentType: .markReview)
+    document.updateComment(for: document.annotations[0].id, comment: "After")
+
+    #expect(snapshot.id == id)
+    #expect(snapshot.annotations[0].comment == "Before")
+    #expect(document.annotations[0].comment == "After")
+}
+
+@Test("reference document edits do not publish automatic save events")
+func referenceDocumentEditsDoNotPublishAutomaticSaveEvents() {
+    let document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: "Text",
+        annotations: [ReviewAnnotation(
+            sequence: 1,
+            kind: .text,
+            selectedText: "Text",
+            contextBefore: "",
+            contextAfter: "",
+            blockText: "Text",
+            section: "",
+            comment: "Before"
+        )]
+    )
+    var emissionCount = 0
+    let observation = document.objectWillChange.sink { _ in emissionCount += 1 }
+
+    document.updateComment(for: document.annotations[0].id, comment: "After")
+
+    observation.cancel()
+    #expect(emissionCount == 0)
+}
+
+@Test("successful saves clear the app-owned dirty state")
+@MainActor
+func successfulSavesClearAppOwnedDirtyState() {
+    let id = UUID()
+    let state = MarkReviewDocumentChangeState.shared
+    let delegate = DocumentSaveDelegate(documentID: id)
+
+    state.markDirty(id)
+    delegate.documentDidSave(NSDocument(), didSave: true, contextInfo: nil)
+
+    #expect(!state.isDirty(id))
+}
+
+@Test("failed saves keep the app-owned dirty state")
+@MainActor
+func failedSavesKeepAppOwnedDirtyState() {
+    let id = UUID()
+    let state = MarkReviewDocumentChangeState.shared
+    let delegate = DocumentSaveDelegate(documentID: id)
+
+    state.markDirty(id)
+    delegate.documentDidSave(NSDocument(), didSave: false, contextInfo: nil)
+
+    #expect(state.isDirty(id))
+    state.clear(id)
+}
+
 @Test("region updates preserve the existing annotation identity")
 func regionUpdatePreservesAnnotationIdentity() {
     let id = UUID()
@@ -268,7 +372,7 @@ func regionUpdatePreservesAnnotationIdentity() {
         comment: "Keep my remark.",
         status: .resolved
     )
-    var document = MarkReviewDocument(
+    let document = MarkReviewDocument(
         title: "Review",
         originalMarkdown: "before small part after",
         annotations: [annotation]
