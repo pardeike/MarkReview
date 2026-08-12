@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root=${0:A:h:h}
-expected_team_id="W65292CD8T"
+expected_team_id="${MARKREVIEW_TEAM_ID:-W65292CD8T}"
 signing_identity="${MARKREVIEW_CODESIGN_IDENTITY:-Developer ID Application: Andreas Pardeike ($expected_team_id)}"
 signing_keychain="${MARKREVIEW_CODESIGN_KEYCHAIN:-}"
 notary_profile="${MARKREVIEW_NOTARY_PROFILE:-brrainz-notary}"
@@ -105,12 +105,18 @@ trap cleanup EXIT
 
 cd "$repo_root"
 
-available_identities="$(security find-identity -v -p codesigning)"
+identity_lookup_args=(-v -p codesigning)
+if [[ -n "$signing_keychain" ]]; then
+  identity_lookup_args+=("$signing_keychain")
+fi
+available_identities="$(security find-identity "${identity_lookup_args[@]}")"
 if [[ "$available_identities" != *"$signing_identity"* ]]; then
   print -u2 -- "Code-signing identity not found: $signing_identity"
   exit 1
 fi
 
+plutil -lint "$repo_root/Resources/Info.plist" >/dev/null
+swift test
 swift build -c release --product MarkReview
 
 binary_directory="$(swift build -c release --show-bin-path)"

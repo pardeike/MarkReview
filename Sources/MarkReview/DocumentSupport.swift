@@ -4,23 +4,29 @@ import UniformTypeIdentifiers
 
 extension UTType {
     static let markReview = UTType(exportedAs: "com.markreview.document", conformingTo: .json)
+    static let markReviewMarkdown = UTType(
+        importedAs: "net.daringfireball.markdown",
+        conformingTo: .plainText
+    )
 }
 
 extension MarkReviewDocument {
     public static var readableContentTypes: [UTType] {
-        [.markReview, .plainText, .text]
+        [.markReview, .markReviewMarkdown]
     }
 
     public static var writableContentTypes: [UTType] {
-        [.markReview, .plainText, .text]
+        [.markReview]
     }
 
     public convenience init(configuration: FileDocumentReadConfiguration) throws {
         let data = configuration.file.regularFileContents ?? Data()
-        if let decoded = try? JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data) {
+        if configuration.contentType.conforms(to: .markReview) {
+            let decoded = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data)
             self.init()
             replace(with: decoded)
-        } else if let markdown = String(data: data, encoding: .utf8) {
+        } else if configuration.contentType.conforms(to: .markReviewMarkdown),
+                  let markdown = String(data: data, encoding: .utf8) {
             let filename = configuration.file.preferredFilename ?? configuration.file.filename
             let title = filename.map {
                 URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent
@@ -36,9 +42,6 @@ extension MarkReviewDocument {
     }
 
     public func fileWrapper(snapshot: MarkReviewDocument, configuration: FileDocumentWriteConfiguration) throws -> FileWrapper {
-        if configuration.contentType.conforms(to: .plainText) {
-            return FileWrapper(regularFileWithContents: Data(snapshot.originalMarkdown.utf8))
-        }
         let data = try JSONEncoder.markReview.encode(snapshot)
         return FileWrapper(regularFileWithContents: data)
     }

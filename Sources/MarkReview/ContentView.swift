@@ -43,6 +43,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let focusToken: Int
+    let accessibilityLabel: String
 
     private final class FocusableTextView: NSTextView {
         var shouldBecomeFirstResponder = false
@@ -90,6 +91,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.setAccessibilityLabel(accessibilityLabel)
 
         scrollView.documentView = textView
         return scrollView
@@ -98,6 +100,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? FocusableTextView else { return }
+        textView.setAccessibilityLabel(accessibilityLabel)
         if textView.string != text {
             textView.string = text
         }
@@ -221,7 +224,6 @@ struct ContentView: View {
         .focusedSceneValue(\.markReviewActions, MarkReviewActions(
             saveDocument: saveDocument,
             closeWindow: closeWindow,
-            exportAgentJSON: exportAgentJSON,
             renumberAnnotations: renumberAnnotations,
             toggleSidebar: toggleSidebar,
             isSidebarVisible: isSidebarVisible,
@@ -230,31 +232,12 @@ struct ContentView: View {
             resetPreviewZoom: resetPreviewZoom,
             canZoomInPreview: canZoomInPreview,
             canZoomOutPreview: canZoomOutPreview,
-            isPreviewAtActualSize: isPreviewAtActualSize,
-            canExportAgentJSON: !document.originalMarkdown.isEmpty
+            isPreviewAtActualSize: isPreviewAtActualSize
         ))
         .background(WindowFrameObserver(
             identifier: document.id.uuidString,
             prepareForSave: prepareDraftForSave
         ))
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentExport)) { _ in
-            exportAgentJSON()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentRenumber)) { _ in
-            renumberAnnotations()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentToggleSidebar)) { _ in
-            toggleSidebar()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentZoomIn)) { _ in
-            zoomInPreview()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentZoomOut)) { _ in
-            zoomOutPreview()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentResetPreviewZoom)) { _ in
-            resetPreviewZoom()
-        }
         .onChange(of: focusedComment) { _, focus in
             switch focus {
             case .draft:
@@ -349,6 +332,7 @@ struct ContentView: View {
                 placeholder: "Type your remark…",
                 focus: .draft,
                 focusToken: commentFocusToken,
+                accessibilityLabel: "New review comment",
                 onFocus: {
                     selectedAnnotationID = id
                     requestPreviewFocus(id)
@@ -364,9 +348,10 @@ struct ContentView: View {
     }
 
     private func annotationCard(_ value: ReviewAnnotation) -> some View {
+        let isMuted = value.status == .muted
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 9) {
-                numberBadge(value.sequence, selected: selectedAnnotationID == value.id)
+                numberBadge(value.sequence, selected: selectedAnnotationID == value.id, muted: isMuted)
                 Text("“\(value.selectedText)”")
                     .font(.body.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -381,6 +366,7 @@ struct ContentView: View {
                 placeholder: "Type your remark…",
                 focus: .annotation(value.id),
                 focusToken: commentFocusToken,
+                accessibilityLabel: "Review comment \(value.sequence)",
                 onFocus: {
                     selectedAnnotationID = value.id
                     requestPreviewFocus(value.id)
@@ -388,7 +374,7 @@ struct ContentView: View {
             )
             HStack(spacing: 6) {
                 Spacer()
-                pillButton(value.status == .open ? "Resolve" : "Reopen") {
+                pillButton(isMuted ? "Unmute" : "Mute") {
                     toggleStatus(for: value.id)
                 }
                 pillButton("Delete") {
@@ -401,19 +387,19 @@ struct ContentView: View {
             }
         }
         .padding(11)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+        .background(Color.secondary.opacity(isMuted ? 0.035 : 0.07), in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewAccent.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
         .id("annotation-\(value.id.uuidString)")
         .onTapGesture { selectAnnotation(value.id) }
     }
 
-    private func numberBadge(_ number: Int, selected: Bool) -> some View {
+    private func numberBadge(_ number: Int, selected: Bool, muted: Bool = false) -> some View {
         Text(String(number))
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .background(selected ? Color.reviewAccent : Color.reviewAccent.opacity(0.45), in: Circle())
+            .background(muted ? Color.secondary : (selected ? Color.reviewAccent : Color.reviewAccent.opacity(0.45)), in: Circle())
             .overlay {
                 if selected {
                     Circle()
@@ -421,6 +407,7 @@ struct ContentView: View {
                         .padding(-3)
                 }
             }
+            .accessibilityHidden(true)
     }
 
     private func commentEditor(
@@ -428,6 +415,7 @@ struct ContentView: View {
         placeholder: String,
         focus: CommentFocus,
         focusToken: Int,
+        accessibilityLabel: String,
         onFocus: @escaping () -> Void
     ) -> some View {
         let editorFocus = Binding<Bool>(
@@ -450,7 +438,12 @@ struct ContentView: View {
                     .padding(8)
                     .allowsHitTesting(false)
             }
-            ReviewTextEditor(text: text, isFocused: editorFocus, focusToken: focusToken)
+            ReviewTextEditor(
+                text: text,
+                isFocused: editorFocus,
+                focusToken: focusToken,
+                accessibilityLabel: accessibilityLabel
+            )
                 .padding(8)
                 .frame(minHeight: 66, maxHeight: 120)
         }
@@ -475,7 +468,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Text("Start a Markdown review")
                 .font(.title2.weight(.semibold))
-            Text("Open a Markdown file, annotate passages, and export a numbered JSON review for your agent.")
+            Text("Open a Markdown file, annotate passages, and save the review to give directly to your agent.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)
@@ -615,7 +608,7 @@ struct ContentView: View {
     private func updateDraftComment(_ value: String) {
         draftComment = value
         if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            MarkReviewDocumentChangeState.shared.markDirty(document.id)
+            markDocumentEdited()
         }
     }
 
@@ -723,23 +716,7 @@ struct ContentView: View {
         if let closeGuard = window?.delegate as? ReviewWindowCloseGuard {
             closeGuard.save(nativeDocument)
         } else {
-            nativeDocument.save(
-                withDelegate: DocumentSaveDelegate(documentID: document.id),
-                didSave: #selector(DocumentSaveDelegate.documentDidSave(_:didSave:contextInfo:)),
-                contextInfo: nil
-            )
-        }
-    }
-
-    private func exportAgentJSON() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "\(document.title)-review.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = try JSONEncoder.markReview.encode(AgentExport(document: document))
-            try data.write(to: url, options: .atomic)
-        } catch {
+            DocumentSaveDelegate(documentID: document.id).save(nativeDocument)
         }
     }
 
@@ -811,7 +788,12 @@ struct ContentView: View {
     }
 
     private func markDocumentEdited() {
-        MarkReviewDocumentChangeState.shared.markDirty(document.id)
+        let changeState = MarkReviewDocumentChangeState.shared
+        let wasDirty = changeState.isDirty(document.id)
+        changeState.markDirty(document.id)
+        if !wasDirty {
+            activeNativeDocument()?.updateChangeCount(.changeDone)
+        }
         documentRevision &+= 1
     }
 

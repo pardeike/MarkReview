@@ -88,7 +88,7 @@ public enum AnnotationKind: String, Codable, CaseIterable {
 
 public enum AnnotationStatus: String, Codable, CaseIterable {
     case open
-    case resolved
+    case muted
 }
 
 public struct ReviewAnnotation: Identifiable, Codable, Equatable {
@@ -139,6 +139,7 @@ public struct ReviewAnnotation: Identifiable, Codable, Equatable {
 
 public final class MarkReviewDocument: Codable, Equatable, ObservableObject, ReferenceFileDocument, @unchecked Sendable {
     public static let currentFormatVersion = 1
+    public static let currentAgentInstructions = "Act only on annotations whose status is open. Ignore annotations whose status is muted."
 
     // The editor intentionally does not publish document mutations. SwiftUI's
     // DocumentGroup treats published reference-document changes as save-worthy;
@@ -150,6 +151,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
 
     public var id: UUID
     public var formatVersion: Int
+    public let agentInstructions: String
     public var title: String
     public var sourcePath: String?
     public var originalMarkdown: String
@@ -164,6 +166,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
     ) {
         self.id = id
         self.formatVersion = Self.currentFormatVersion
+        self.agentInstructions = Self.currentAgentInstructions
         self.title = title
         self.sourcePath = sourcePath
         self.originalMarkdown = originalMarkdown
@@ -173,6 +176,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
     private enum CodingKeys: String, CodingKey {
         case id
         case formatVersion
+        case agentInstructions
         case title
         case sourcePath
         case originalMarkdown
@@ -181,8 +185,17 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedFormatVersion = try container.decode(Int.self, forKey: .formatVersion)
+        guard decodedFormatVersion == Self.currentFormatVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion,
+                in: container,
+                debugDescription: "Unsupported MarkReview document format."
+            )
+        }
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion) ?? Self.currentFormatVersion
+        formatVersion = decodedFormatVersion
+        agentInstructions = Self.currentAgentInstructions
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Untitled review"
         sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
         originalMarkdown = try container.decodeIfPresent(String.self, forKey: .originalMarkdown) ?? ""
@@ -200,7 +213,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
 
     public func toggleStatus(for id: UUID) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].status = annotations[index].status == .open ? .resolved : .open
+        annotations[index].status = annotations[index].status == .open ? .muted : .open
     }
 
     public func updateComment(for id: UUID, comment: String) {
@@ -277,6 +290,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
     public static func == (lhs: MarkReviewDocument, rhs: MarkReviewDocument) -> Bool {
         lhs.id == rhs.id
             && lhs.formatVersion == rhs.formatVersion
+            && lhs.agentInstructions == rhs.agentInstructions
             && lhs.title == rhs.title
             && lhs.sourcePath == rhs.sourcePath
             && lhs.originalMarkdown == rhs.originalMarkdown
@@ -284,7 +298,7 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
     }
 
     private static func topDownPosition(for annotation: ReviewAnnotation, in markdown: String) -> (Int, Int) {
-        let location = [annotation.selectedText, annotation.blockText]
+        let location = [annotation.blockText, annotation.selectedText]
             .compactMap { ReviewSourceLocator.locate($0, in: markdown) }
             .first
         let line = location?.lineStart ?? annotation.sourceLineStart ?? Int.max
@@ -316,81 +330,6 @@ public struct SelectedRegion: Equatable {
         self.blockText = blockText
         self.section = section
     }
-}
-
-public struct AgentExport: Codable {
-    public let format: String
-    public let version: Int
-    public let source: AgentExportSource
-    public let annotations: [AgentExportAnnotation]
-
-    public init(document: MarkReviewDocument) {
-        self.format = "markreview-agent-export"
-        self.version = 1
-        self.source = AgentExportSource(
-            title: document.title,
-            path: document.sourcePath,
-            markdown: document.originalMarkdown
-        )
-        self.annotations = document.annotations
-            .filter { !$0.comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .sorted { $0.sequence < $1.sequence }
-            .map(AgentExportAnnotation.init)
-    }
-}
-
-public struct AgentExportSource: Codable {
-    public let title: String
-    public let path: String?
-    public let markdown: String
-}
-
-public struct AgentExportAnnotation: Codable {
-    public let number: Int
-    public let id: String
-    public let status: String
-    public let kind: String
-    public let section: String
-    public let selectedText: String
-    public let blockText: String
-    public let context: AgentContext
-    public let comment: String
-    public let sourceLines: AgentSourceLines?
-    public let createdAt: String
-
-    public init(annotation: ReviewAnnotation) {
-        number = annotation.sequence
-        id = annotation.id.uuidString
-        status = annotation.status.rawValue
-        kind = annotation.kind.rawValue
-        section = annotation.section
-        selectedText = annotation.selectedText
-        blockText = annotation.blockText
-        context = AgentContext(
-            before: annotation.contextBefore,
-            after: annotation.contextAfter
-        )
-        comment = annotation.comment
-        if annotation.sourceLineStart != nil || annotation.sourceLineEnd != nil {
-            sourceLines = AgentSourceLines(
-                start: annotation.sourceLineStart,
-                end: annotation.sourceLineEnd
-            )
-        } else {
-            sourceLines = nil
-        }
-        createdAt = ISO8601DateFormatter.markReview.string(from: annotation.createdAt)
-    }
-}
-
-public struct AgentContext: Codable {
-    public let before: String
-    public let after: String
-}
-
-public struct AgentSourceLines: Codable {
-    public let start: Int?
-    public let end: Int?
 }
 
 extension ISO8601DateFormatter {

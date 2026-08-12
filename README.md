@@ -1,98 +1,95 @@
 # MarkReview
 
-MarkReview is a small, free macOS document-review app for Markdown files.
+Turn feedback on a Markdown document into clear instructions for an AI agent.
 
-It is designed for the workflow where a human reads a document, selects a
-passage, writes a comment, and then gives the resulting structured review to
-an AI agent. The app deliberately keeps the scope narrow:
+MarkReview gives you a comfortable place to read, select, and comment. When you
+are done, save one `.markreview` file and give it directly to the agent. There
+is no export step and no long prompt to assemble by hand.
 
-- Markdown is rendered in a native macOS window using Apple's `swift-markdown`
-  Swift package and a local WebKit preview.
-- Select rendered text and choose **Comment selection**, or hold Option and
-  click a paragraph/list item/heading to comment on the whole block.
-- Comments appear in a right-hand review panel and can be resolved or deleted.
-- The review is saved as one `.markreview` document containing the original
-  Markdown and annotations. The source `.md` file is never modified.
-- Markdown files and MarkReview documents have distinct Finder document icons,
-  so the two file types remain easy to distinguish outside the app.
-- **Export Agent JSON** writes numbered annotations with the exact selected
-  text, section, surrounding context, source-line hints, and status.
+<p align="center">
+  <img src="docs/Hero.png" alt="MarkReview showing highlighted Markdown beside numbered review comments" width="100%">
+</p>
 
-## Build and run
+## Review without losing your train of thought
 
-Requirements: macOS 14 or later, Xcode 27 or a compatible Swift toolchain.
+Long feedback is hard to write in a chat box. It is easy to lose the exact
+sentence you meant, mix up comment numbers, or run out of time before the
+prompt is ready.
 
-```sh
-./scripts/build-app.sh
-open /Applications/MarkReview.app
-```
+MarkReview makes that work feel like reviewing a document:
 
-The canonical release install requires a Developer ID Application certificate
-for team `W65292CD8T` and the `brrainz-notary` Keychain profile. The script
-builds and assembles the app outside the repository, signs it with the
-hardened runtime and a trusted timestamp, submits it to Apple's notarization
-service, staples the accepted ticket, validates it with Gatekeeper, and then
-installs it at `/Applications/MarkReview.app`. The installed app is replaced
-only after all pre-installation checks pass.
+- Open any Markdown file. The original file stays unchanged.
+- Select text to add a comment, or Option-click a block to comment on the whole
+  paragraph, heading, list item, or code block.
+- See every comment beside the passage it refers to.
+- Mute a comment when you want to keep it for later but do not want the agent to
+  act on it.
+- Close the app and continue another day. Your saved review and open windows
+  come back when you return.
+- Save the review and send the `.markreview` file to the agent.
 
-Use `MARKREVIEW_CODESIGN_IDENTITY` or `MARKREVIEW_NOTARY_PROFILE` to use a
-different Developer ID identity or saved `notarytool` profile. If either is
-outside the normal Keychain search list, provide its Keychain path through
-`MARKREVIEW_CODESIGN_KEYCHAIN` or `MARKREVIEW_NOTARY_KEYCHAIN`.
+## A complete prompt in one file
 
-You can also run the executable during development:
+A `.markreview` file contains the original Markdown, your numbered comments,
+the selected text, nearby context, section names, and source-line hints. It is
+plain JSON, so it is easy to inspect, diff, and back up. It also carries a
+short agent instruction that defines how comment states must be handled.
+
+Comments have one of two clear states:
+
+- `open` means the comment is an instruction the agent should act on.
+- `muted` means the comment is kept for the reviewer but is non-actionable and
+  must be ignored by the agent.
+
+The file is the handoff. MarkReview does not keep a hidden database and does
+not create a second export format.
+
+## Simple, focused tools
+
+- Linked highlights and comment cards make even short selections easy to find.
+- Review numbers can be reset to top-to-bottom document order at any time.
+- Reading size can be changed from the View menu or by Option-scrolling over
+  the document.
+- Markdown and MarkReview files have different Finder icons.
+- MarkReview follows the macOS accent color and supports light and dark mode.
+
+MarkReview is a review tool, not a Markdown editor. It stores a snapshot of the
+Markdown you opened, so later edits to the source file cannot silently change
+the review. Remote images and raw HTML are not loaded as active web content;
+the review stays local and text-focused.
+
+## Run from source
+
+MarkReview requires macOS 14 or later and a compatible Swift toolchain.
 
 ```sh
 swift run MarkReview
 ```
 
-## Workflow
+The only direct third-party package is Apple's
+[`swift-markdown`](https://github.com/apple/swift-markdown), used to turn the
+source Markdown into the local preview. `swift-cmark` is brought in by that
+package and is not used directly by MarkReview.
 
-1. Open a Markdown file with **File > Open…** to start a separate review copy.
-2. Select a sentence or paragraph in the rendered document. A numbered review
-   item appears immediately in the right sidebar and its remark field receives
-   focus, so you can start typing without a second dialog.
-3. Use **View > Actual Size**, **View > Zoom In**, or **View > Zoom Out** to
-   change the Markdown reading size. The same adjustment is available by
-   holding Option while scrolling over the Markdown preview.
-4. If you change the selection before typing a remark, the pending item follows
-   the new selection. Once a remark contains text, it becomes a saved annotation
-   and a later selection starts the next numbered item.
-5. Click a review item to focus its remark and bring its highlighted passage
-   into view near the top quarter of the Markdown page. The matching number,
-   tinted with your macOS accent color, is shown beside the passage on the left.
-6. Save the review as `Document.markreview`. MarkReview keeps the original
-   Markdown inside that document and never modifies the source `.md` file.
-7. Choose **File > Export Agent JSON…** and give the exported JSON to the
-   agent. Empty, unfinished items are not exported.
-8. Use **Tools > Renumber Comments** whenever you want the item numbers reset
-   to the document's top-down order.
+## Build the signed release app
 
-MarkReview is a macOS document app: its open review documents are restored
-after the app is quit and relaunched, and each document's complete window frame
-(position and size) is remembered independently.
+The release script tests the project, creates a hardened Developer ID build,
+submits it to Apple for notarization, staples the ticket, checks it with
+Gatekeeper, and installs the verified app at `/Applications/MarkReview.app`.
 
-MarkReview does not create a blank `Untitled` review window at launch. Start a
-review with **File > Open…**; **File > New** is
-available when a new empty review is intentionally wanted.
+```sh
+./scripts/build-app.sh
+```
 
-The Markdown preview and comment list stay linked while you read. Scrolling
-the preview selects and reveals the nearby comment in the sidebar, and
-scrolling the sidebar brings the corresponding highlighted passage into view.
+The default setup expects the project maintainer's Developer ID certificate
+and the `brrainz-notary` Keychain profile. A different setup can be supplied
+with these environment variables:
 
-The `.markreview` file is JSON rather than a binary container, so it remains
-inspectable, diffable, and easy to back up in iCloud. It is a separate copy of
-the Markdown plus review state; no hidden database is required.
+- `MARKREVIEW_CODESIGN_IDENTITY`
+- `MARKREVIEW_TEAM_ID`
+- `MARKREVIEW_CODESIGN_KEYCHAIN`
+- `MARKREVIEW_NOTARY_PROFILE`
+- `MARKREVIEW_NOTARY_KEYCHAIN`
 
-## Deliberate limitations in this first version
-
-- This is a review surface, not a Markdown editor. The opened Markdown is
-  intentionally read-only inside the review document.
-- Text annotations are anchored by quoted text and surrounding context. If the
-  source is later changed, the agent can still locate the intended passage by
-  quote, section, and context, but MarkReview does not yet re-anchor visually.
-- Option-click creates a block annotation. There is no freehand drawing layer;
-  “circle an area” is represented as a selected block so the exported data is
-  useful to an agent rather than dependent on screen coordinates.
-- Images and advanced Markdown extensions are left to the renderer's normal
-  behavior; the review anchor is textual.
+Temporary build, signing, or installation failures leave the previously
+installed app in place.

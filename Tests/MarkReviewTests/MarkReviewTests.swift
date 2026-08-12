@@ -25,6 +25,7 @@ func documentRoundTrip() throws {
     let data = try JSONEncoder.markReview.encode(original)
     let decoded = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data)
     #expect(decoded.formatVersion == original.formatVersion)
+    #expect(decoded.agentInstructions == MarkReviewDocument.currentAgentInstructions)
     #expect(decoded.id == original.id)
     #expect(decoded.title == original.title)
     #expect(decoded.sourcePath == original.sourcePath)
@@ -33,41 +34,57 @@ func documentRoundTrip() throws {
     #expect(decoded.annotations.map(\.comment) == original.annotations.map(\.comment))
 }
 
-@Test("agent export preserves sequence and context")
-func agentExport() throws {
+@Test("review documents carry explicit muted-agent instructions")
+func reviewDocumentsCarryMutedAgentInstructions() throws {
     let document = MarkReviewDocument(
         title: "Review",
-        originalMarkdown: "# Heading\n\nText",
+        originalMarkdown: "Text",
         annotations: [ReviewAnnotation(
-            sequence: 3,
-            kind: .block,
+            sequence: 1,
+            kind: .text,
             selectedText: "Text",
             contextBefore: "",
             contextAfter: "",
             blockText: "Text",
-            section: "Heading",
-            comment: "Make this actionable."
+            section: "",
+            comment: "Ignore this for now.",
+            status: .muted
         )]
     )
-    let export = AgentExport(document: document)
-    #expect(export.annotations.first?.number == 3)
-    #expect(export.annotations.first?.comment == "Make this actionable.")
-    #expect(export.source.markdown == "# Heading\n\nText")
+    let data = try JSONEncoder.markReview.encode(document)
+    let decoded = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: data)
+
+    #expect(decoded.formatVersion == MarkReviewDocument.currentFormatVersion)
+    #expect(decoded.agentInstructions == MarkReviewDocument.currentAgentInstructions)
+    #expect(decoded.annotations.first?.status == .muted)
+    let json = String(decoding: data, as: UTF8.self)
+    #expect(json.contains("Act only on annotations whose status is open"))
+    #expect(json.contains("\"status\" : \"muted\""))
 }
 
-@Test("agent export omits an unfinished inline comment")
-func agentExportOmitsEmptyComments() {
-    let document = MarkReviewDocument(
-        title: "Review",
-        originalMarkdown: "Text",
-        annotations: [
-            ReviewAnnotation(sequence: 1, kind: .text, selectedText: "Text", contextBefore: "", contextAfter: "", blockText: "Text", section: "", comment: "   "),
-            ReviewAnnotation(sequence: 2, kind: .text, selectedText: "Text", contextBefore: "", contextAfter: "", blockText: "Text", section: "", comment: "Keep this one.")
-        ]
-    )
+@Test("future review formats are rejected instead of overwritten")
+func futureReviewFormatsAreRejected() throws {
+    let data = try JSONEncoder.markReview.encode(MarkReviewDocument(originalMarkdown: "Text"))
+    guard var payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw CocoaError(.fileReadCorruptFile)
+    }
+    payload["formatVersion"] = MarkReviewDocument.currentFormatVersion + 1
+    let futureData = try JSONSerialization.data(withJSONObject: payload)
 
-    let export = AgentExport(document: document)
-    #expect(export.annotations.map(\.number) == [2])
+    var rejected = false
+    do {
+        _ = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: futureData)
+    } catch {
+        rejected = true
+    }
+    #expect(rejected)
+}
+
+@Test("Markdown is readable but only reviews are writable")
+func documentContentTypesKeepMarkdownImportOnly() {
+    #expect(MarkReviewDocument.readableContentTypes.contains(.markReviewMarkdown))
+    #expect(MarkReviewDocument.readableContentTypes.contains(.markReview))
+    #expect(MarkReviewDocument.writableContentTypes == [.markReview])
 }
 
 @Test("renumbering follows Markdown order")
@@ -204,6 +221,24 @@ func sourceLineHintsIgnoreMarkdownSyntax() {
     ) == (3, 3))
 }
 
+@Test("source line hints use the containing block to disambiguate short selections")
+func sourceLineHintsUseContainingBlock() {
+    let renderer = MarkdownRenderer()
+    let region = SelectedRegion(
+        kind: .text,
+        selectedText: "t",
+        contextBefore: "Release by",
+        contextAfter: "es are built once.",
+        blockText: "Release bytes are built once.",
+        section: "Later"
+    )
+
+    #expect(renderer.sourceLineHints(
+        for: region,
+        in: "# First\n\nThe first t is here.\n\n# Later\n\nRelease bytes are built once."
+    ) == (7, 7))
+}
+
 @Test("preview positions review markers from the document rail")
 func previewPositionsMarkersFromDocumentRail() {
     let rendered = MarkdownRenderer().render("1. First item")
@@ -226,7 +261,8 @@ func previewKeepsNativeOrderedListMarkersOutsideReviewMarkers() {
 func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
     let rendered = MarkdownRenderer().render("One letter: a. Another letter: a.")
 
-    #expect(rendered.contains("contextForSelection(block, selectionRange)"))
+    #expect(rendered.contains("const contextScope = block.contains(endElement) ? block : root"))
+    #expect(rendered.contains("contextForSelection(contextScope, selectionRange)"))
     #expect(rendered.contains("function findTextRange(text, item)"))
     #expect(rendered.contains("expectedBefore && candidateBefore.endsWith(expectedBefore)"))
     #expect(rendered.contains("expectedAfter && candidateAfter.startsWith(expectedAfter)"))
@@ -262,6 +298,37 @@ func previewUsesSystemAccentColor() {
     #expect(rendered.contains(accent.cssRGBA()))
     #expect(!rendered.contains("#60a5fa"))
     #expect(!rendered.contains("rgba(0, 122, 255"))
+}
+
+@Test("preview confines executable content to MarkReview's nonce")
+func previewUsesRestrictiveContentSecurityPolicy() {
+    let rendered = MarkdownRenderer().render("<script>alert('untrusted')</script>")
+
+    #expect(rendered.contains("default-src 'none'"))
+    #expect(rendered.contains("script-src 'nonce-"))
+    #expect(rendered.contains("style-src 'nonce-"))
+    #expect(rendered.contains("form-action 'none'"))
+    #expect(!rendered.contains("__MARKREVIEW_CONTENT_NONCE__"))
+    #expect(!rendered.contains("'unsafe-inline'"))
+}
+
+@Test("preview opens only ordinary web links outside its isolated document")
+func previewNavigationIsRestricted() {
+    #expect(PreviewNavigationPolicy.opensExternally(URL(string: "https://example.com")!))
+    #expect(PreviewNavigationPolicy.opensExternally(URL(string: "mailto:review@example.com")!))
+    #expect(!PreviewNavigationPolicy.opensExternally(URL(string: "file:///tmp/source")!))
+    #expect(!PreviewNavigationPolicy.opensExternally(URL(string: "javascript:alert(1)")!))
+    #expect(PreviewNavigationPolicy.allowsInPreview(URL(string: "about:blank")!))
+    #expect(!PreviewNavigationPolicy.allowsInPreview(URL(string: "https://example.com")!))
+}
+
+@Test("muted annotations are explicitly non-actionable in the preview")
+func previewMarksMutedAnnotationsAsIgnored() {
+    let rendered = MarkdownRenderer().render("Text")
+
+    #expect(rendered.contains("item.status === 'muted'"))
+    #expect(rendered.contains("muted and ignored by agents"))
+    #expect(rendered.contains(".review-outline.review-muted"))
 }
 
 @Test("document change state tracks edits until explicitly cleared")
@@ -370,7 +437,7 @@ func regionUpdatePreservesAnnotationIdentity() {
         blockText: "before small part after",
         section: "Section",
         comment: "Keep my remark.",
-        status: .resolved
+        status: .muted
     )
     let document = MarkReviewDocument(
         title: "Review",
@@ -393,6 +460,6 @@ func regionUpdatePreservesAnnotationIdentity() {
     #expect(document.annotations.first?.id == id)
     #expect(document.annotations.first?.sequence == 1)
     #expect(document.annotations.first?.comment == "Keep my remark.")
-    #expect(document.annotations.first?.status == .resolved)
+    #expect(document.annotations.first?.status == .muted)
     #expect(document.annotations.first?.selectedText == "before small part after")
 }

@@ -8,6 +8,18 @@ struct PreviewFocusRequest: Equatable {
     let token: Int
 }
 
+enum PreviewNavigationPolicy {
+    static func opensExternally(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return ["http", "https", "mailto"].contains(scheme)
+    }
+
+    static func allowsInPreview(_ url: URL?) -> Bool {
+        guard let url else { return true }
+        return url.scheme?.lowercased() == "about"
+    }
+}
+
 private final class ZoomableWebView: WKWebView {
     var onAltScroll: ((CGFloat) -> Void)?
     private var preciseScrollRemainder: CGFloat = 0
@@ -49,6 +61,8 @@ struct PreviewWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.userContentController.add(context.coordinator, name: "review")
         let webView = ZoomableWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -131,6 +145,22 @@ struct PreviewWebView: NSViewRepresentable {
             isReady = true
             applyAnnotationsWhenReady()
             focusRequestedAnnotationWhenReady()
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            let url = navigationAction.request.url
+            if navigationAction.navigationType == .linkActivated,
+               let url,
+               PreviewNavigationPolicy.opensExternally(url) {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(PreviewNavigationPolicy.allowsInPreview(url) ? .allow : .cancel)
         }
 
         func applyAnnotationsWhenReady() {

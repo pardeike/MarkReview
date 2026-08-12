@@ -29,6 +29,20 @@ final class DocumentSaveDelegate: NSObject {
         self.documentID = documentID
     }
 
+    func save(_ document: NSDocument) {
+        objc_setAssociatedObject(
+            document,
+            &documentSaveDelegateKey,
+            self,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
+        document.save(
+            withDelegate: self,
+            didSave: #selector(documentDidSave(_:didSave:contextInfo:)),
+            contextInfo: nil
+        )
+    }
+
     @objc func documentDidSave(
         _ document: NSDocument,
         didSave didSaveSuccessfully: Bool,
@@ -36,7 +50,9 @@ final class DocumentSaveDelegate: NSObject {
     ) {
         if didSaveSuccessfully {
             MarkReviewDocumentChangeState.shared.clear(documentID)
+            document.updateChangeCount(.changeCleared)
         }
+        objc_setAssociatedObject(document, &documentSaveDelegateKey, nil, .OBJC_ASSOCIATION_ASSIGN)
     }
 }
 
@@ -44,16 +60,38 @@ final class DocumentSaveDelegate: NSObject {
 final class ReviewWindowCloseGuard: NSObject, NSWindowDelegate {
     let documentID: UUID
     var prepareForSave: (() -> Void)?
+    private weak var forwardingDelegate: (any NSWindowDelegate)?
     private weak var pendingWindow: NSWindow?
     private var isSaving = false
+    private var isPresentingCloseAlert = false
 
-    init(documentID: UUID, prepareForSave: (() -> Void)? = nil) {
+    init(
+        documentID: UUID,
+        prepareForSave: (() -> Void)? = nil,
+        forwardingDelegate: (any NSWindowDelegate)? = nil
+    ) {
         self.documentID = documentID
         self.prepareForSave = prepareForSave
+        self.forwardingDelegate = forwardingDelegate
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || forwardingDelegate?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if forwardingDelegate?.responds(to: selector) == true {
+            return forwardingDelegate
+        }
+        return super.forwardingTarget(for: selector)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard MarkReviewDocumentChangeState.shared.isDirty(documentID) else { return true }
+        guard MarkReviewDocumentChangeState.shared.isDirty(documentID) else {
+            return forwardingDelegate?.windowShouldClose?(sender) ?? true
+        }
+        guard !isPresentingCloseAlert else { return false }
+        isPresentingCloseAlert = true
 
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -63,29 +101,26 @@ final class ReviewWindowCloseGuard: NSObject, NSWindowDelegate {
         alert.addButton(withTitle: "Don't Save")
         alert.addButton(withTitle: "Cancel")
 
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            guard let document = sender.windowController?.document else {
-                MarkReviewDocumentChangeState.shared.clear(documentID)
-                return true
-            }
-            pendingWindow = sender
-            // Starting an NSDocument save directly from windowShouldClose can
-            // re-enter AppKit's synchronous close/save activity and beachball.
-            // Let the close decision return first, then start the async save.
-            DispatchQueue.main.async { [weak self, weak sender, weak document] in
-                guard let self, let sender, let document = document as? NSDocument,
-                      sender.windowController?.document === document else { return }
+        alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+            guard let self, let sender else { return }
+            self.isPresentingCloseAlert = false
+            switch response {
+            case .alertFirstButtonReturn:
+                guard let document = sender.windowController?.document as? NSDocument else {
+                    MarkReviewDocumentChangeState.shared.clear(self.documentID)
+                    sender.close()
+                    return
+                }
                 self.save(document, closing: sender)
+            case .alertSecondButtonReturn:
+                sender.windowController?.document?.updateChangeCount(.changeCleared)
+                MarkReviewDocumentChangeState.shared.clear(self.documentID)
+                sender.close()
+            default:
+                break
             }
-            return false
-        case .alertSecondButtonReturn:
-            sender.windowController?.document?.updateChangeCount(.changeCleared)
-            MarkReviewDocumentChangeState.shared.clear(documentID)
-            return true
-        default:
-            return false
         }
+        return false
     }
 
     func save(_ document: NSDocument, closing window: NSWindow? = nil) {
@@ -113,12 +148,14 @@ final class ReviewWindowCloseGuard: NSObject, NSWindowDelegate {
             return
         }
         MarkReviewDocumentChangeState.shared.clear(documentID)
+        document.updateChangeCount(.changeCleared)
         pendingWindow?.close()
         pendingWindow = nil
     }
 }
 
 private var reviewWindowCloseGuardKey: UInt8 = 0
+private var documentSaveDelegateKey: UInt8 = 0
 
 struct WindowFrameObserver: NSViewRepresentable {
     let identifier: String
@@ -148,7 +185,11 @@ struct WindowFrameObserver: NSViewRepresentable {
         if let documentID = UUID(uuidString: identifier) {
             let existingGuard = objc_getAssociatedObject(window, &reviewWindowCloseGuardKey) as? ReviewWindowCloseGuard
             if existingGuard?.documentID != documentID {
-                let closeGuard = ReviewWindowCloseGuard(documentID: documentID, prepareForSave: prepareForSave)
+                let closeGuard = ReviewWindowCloseGuard(
+                    documentID: documentID,
+                    prepareForSave: prepareForSave,
+                    forwardingDelegate: window.delegate
+                )
                 objc_setAssociatedObject(window, &reviewWindowCloseGuardKey, closeGuard, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
                 window.delegate = closeGuard
             } else {

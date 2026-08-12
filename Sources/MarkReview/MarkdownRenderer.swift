@@ -6,7 +6,9 @@ struct MarkdownRenderer {
         let document = Document(parsing: markdown)
         let body = HTMLFormatter.format(document)
         let accent = SystemAccentPalette.current
+        let contentNonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         return HTMLPage.template
+            .replacingOccurrences(of: "__MARKREVIEW_CONTENT_NONCE__", with: contentNonce)
             .replacingOccurrences(of: "__REVIEW_ACCENT_MUTED__", with: accent.cssRGBA(alpha: 0.45))
             .replacingOccurrences(of: "__REVIEW_ACCENT_OUTLINE__", with: accent.cssRGBA(alpha: 0.82))
             .replacingOccurrences(of: "__REVIEW_ACCENT_SELECTED__", with: accent.cssRGBA())
@@ -15,7 +17,7 @@ struct MarkdownRenderer {
     }
 
     func sourceLineHints(for region: SelectedRegion, in markdown: String) -> (Int?, Int?) {
-        let candidates = [region.selectedText, region.blockText]
+        let candidates = [region.blockText, region.selectedText]
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard let location = candidates.compactMap({ ReviewSourceLocator.locate($0, in: markdown) }).first else {
             return (nil, nil)
@@ -31,7 +33,8 @@ private enum HTMLPage {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'nonce-__MARKREVIEW_CONTENT_NONCE__'; style-src 'nonce-__MARKREVIEW_CONTENT_NONCE__'; base-uri 'none'; form-action 'none'">
+      <style nonce="__MARKREVIEW_CONTENT_NONCE__">
         :root { --markdown-font-scale: 1; color-scheme: light dark; }
         * { box-sizing: border-box; }
         body { margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: calc(16px * var(--markdown-font-scale)); line-height: 1.58; color: #202124; background: #fff; }
@@ -52,22 +55,26 @@ private enum HTMLPage {
         #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }
         #review-marker-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 3; overflow: visible; pointer-events: none; }
         .review-outline { fill: none; stroke: __REVIEW_ACCENT_OUTLINE__; stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
+        .review-outline.review-muted { stroke: #94a3b8; opacity: .55; }
         .review-outline.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; }
+        .review-outline.review-muted.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; opacity: 1; }
         .review-marker { position: absolute; left: 0; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: auto; transform: translateX(var(--stack-offset, 0px)); transition: transform .12s ease, box-shadow .12s ease; }
         .review-marker.review-selected { z-index: 10; background: __REVIEW_ACCENT_SELECTED__; box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 1px 3px rgba(0,0,0,.18); }
         .review-marker:hover { z-index: 100; transform: translateX(var(--stack-offset, 0px)) scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.28); }
         .review-marker.review-selected:hover { box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 2px 6px rgba(0,0,0,.28); }
-        .review-marker.review-resolved { background: #94a3b8; }
+        .review-marker.review-muted { background: #94a3b8; }
         #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: calc(12px * var(--markdown-font-scale)); pointer-events: none; }
+        @media (prefers-reduced-motion: reduce) { .review-marker { transition: none; } }
       </style>
     </head>
     <body>
       <main id="document">__MARKDOWN_BODY__</main>
       <div id="hint">Select text · ⌥-click a block for a block comment</div>
-      <script>
+      <script nonce="__MARKREVIEW_CONTENT_NONCE__">
         const review = () => window.webkit?.messageHandlers?.review;
         const root = document.getElementById('document');
         const reviewRanges = new Map();
+        const reviewStatuses = new Map();
 
         function sectionFor(element) {
           const headings = [];
@@ -129,19 +136,35 @@ private enum HTMLPage {
           if (!element || !root.contains(element)) return;
           const selection = window.getSelection();
           const text = selection?.toString().replace(/\s+/g, ' ').trim() || '';
-          const block = blockFor(element);
-          const blockText = readableText(block);
-          const section = sectionFor(block);
 
-          if (event.altKey && blockText) {
+          if (event.altKey) {
+            const block = blockFor(element);
+            const blockText = readableText(block);
+            if (!blockText) return;
             selection.removeAllRanges();
-            send({ kind: 'block', selectedText: blockText, blockText, section, ...contextFor(block, blockText) });
+            send({ kind: 'block', selectedText: blockText, blockText, section: sectionFor(block), ...contextFor(block, blockText) });
             return;
           }
 
           if (!text || !selection.rangeCount) return;
           const selectionRange = selection.getRangeAt(0).cloneRange();
-          const region = { kind: 'text', selectedText: text, blockText, section, ...contextForSelection(block, selectionRange) };
+          const startElement = selectionRange.startContainer.nodeType === Node.ELEMENT_NODE
+            ? selectionRange.startContainer
+            : selectionRange.startContainer.parentElement;
+          const endElement = selectionRange.endContainer.nodeType === Node.ELEMENT_NODE
+            ? selectionRange.endContainer
+            : selectionRange.endContainer.parentElement;
+          if (!startElement || !endElement || !root.contains(startElement) || !root.contains(endElement)) return;
+          const block = blockFor(startElement);
+          const blockText = readableText(block);
+          const contextScope = block.contains(endElement) ? block : root;
+          const region = {
+            kind: 'text',
+            selectedText: text,
+            blockText,
+            section: sectionFor(block),
+            ...contextForSelection(contextScope, selectionRange)
+          };
           selection.removeAllRanges();
           send(region);
         }
@@ -150,6 +173,7 @@ private enum HTMLPage {
 
         function clearHighlights() {
           reviewRanges.clear();
+          reviewStatuses.clear();
           document.querySelectorAll('.review-highlight').forEach(mark => {
             const parent = mark.parentNode;
             while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
@@ -243,11 +267,12 @@ private enum HTMLPage {
 
         function addMarker(block, item, lineRect) {
           const marker = document.createElement('button');
-          marker.className = 'review-marker' + (item.status === 'resolved' ? ' review-resolved' : '');
+          const isMuted = item.status === 'muted';
+          marker.className = 'review-marker' + (isMuted ? ' review-muted' : '');
           marker.dataset.annotationId = item.id;
           marker.dataset.reviewMarker = 'true';
           marker.textContent = item.sequence;
-          marker.setAttribute('aria-label', 'Review ' + item.sequence);
+          marker.setAttribute('aria-label', 'Review ' + item.sequence + (isMuted ? ', muted and ignored by agents' : ''));
           const markerLayer = document.getElementById('review-marker-layer');
           if (!markerLayer) return;
           const rowTop = lineRect.top + (lineRect.height - 24) / 2;
@@ -328,6 +353,7 @@ private enum HTMLPage {
           reviewRanges.forEach((range, annotationID) => {
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.classList.add('review-outline');
+            if (reviewStatuses.get(annotationID) === 'muted') path.classList.add('review-muted');
             path.dataset.annotationId = annotationID;
             path.setAttribute('d', outlinePath(Array.from(range.getClientRects())));
             layer.appendChild(path);
@@ -342,6 +368,7 @@ private enum HTMLPage {
           const block = blockFor(range.startContainer.parentElement);
           const firstLine = range.getClientRects()[0] || range.getBoundingClientRect();
           reviewRanges.set(item.id, range.cloneRange());
+          reviewStatuses.set(item.id, item.status);
           addMarker(block, item, firstLine);
         }
 
@@ -372,7 +399,8 @@ private enum HTMLPage {
           const target = anchor?.closest('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,td,th') || marker;
           if (!target) return;
           const rect = target.getBoundingClientRect();
-          window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: 'smooth' });
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: reduceMotion ? 'auto' : 'smooth' });
         };
 
         window.setMarkdownFontScale = scale => {
