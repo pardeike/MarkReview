@@ -1,6 +1,17 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
 .build/
+.swiftpm/
+
+# Xcode
 DerivedData/
-MarkReview.app/
+xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
-.DS_Store
+*.dSYM/
+*.dSYM.zip
+
+# Local application build product
+MarkReview.app/
