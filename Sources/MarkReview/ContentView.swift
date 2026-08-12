@@ -239,11 +239,11 @@ struct ContentView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            if let draftRegion, let draftID {
-                                draftCard(region: draftRegion, id: draftID)
-                            }
                             ForEach($document.annotations) { $annotation in
                                 annotationCard($annotation)
+                            }
+                            if let draftRegion, let draftID {
+                                draftCard(region: draftRegion, id: draftID)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -256,7 +256,9 @@ struct ContentView: View {
                     .onChange(of: sidebarScrollRequest) { _, request in
                         guard let request else { return }
                         sidebarScrollRequest = nil
-                        let targetID = "annotation-\(request.id.uuidString)"
+                        let targetID = request.id == draftID
+                            ? "draft-\(request.id.uuidString)"
+                            : "annotation-\(request.id.uuidString)"
                         let anchor: UnitPoint = request.anchor == .bottom ? .bottom : .center
                         let scroll = {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -464,15 +466,20 @@ struct ContentView: View {
             if draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.draftRegion = region
                 selectedAnnotationID = draftID
+                if let draftID {
+                    scrollDraftToBottom(draftID)
+                }
                 focusDraft()
                 return
             }
             _ = promoteDraft()
         }
-        draftID = UUID()
+        let id = UUID()
+        draftID = id
         draftRegion = region
         draftComment = ""
-        selectedAnnotationID = draftID
+        selectedAnnotationID = id
+        scrollDraftToBottom(id)
         focusDraft()
     }
 
@@ -547,7 +554,13 @@ struct ContentView: View {
 
     private func selectDraft(id: UUID) {
         selectedAnnotationID = id
+        scrollDraftToBottom(id)
         focusDraft()
+    }
+
+    private func scrollDraftToBottom(_ id: UUID) {
+        pendingBottomScrollID = id
+        sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .bottom)
     }
 
     private func selectAnnotation(_ id: UUID) {
