@@ -1,6 +1,7 @@
 import AppKit
 import ObjectiveC
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class MarkReviewDocumentChangeState {
@@ -36,10 +37,10 @@ final class DocumentSaveDelegate: NSObject {
             self,
             .OBJC_ASSOCIATION_RETAIN_NONATOMIC
         )
-        document.save(
-            withDelegate: self,
-            didSave: #selector(documentDidSave(_:didSave:contextInfo:)),
-            contextInfo: nil
+        MarkReviewSavePolicy.save(
+            document,
+            delegate: self,
+            didSave: #selector(documentDidSave(_:didSave:contextInfo:))
         )
     }
 
@@ -53,6 +54,35 @@ final class DocumentSaveDelegate: NSObject {
             document.updateChangeCount(.changeCleared)
         }
         objc_setAssociatedObject(document, &documentSaveDelegateKey, nil, .OBJC_ASSOCIATION_ASSIGN)
+    }
+}
+
+@MainActor
+enum MarkReviewSavePolicy {
+    static func requiresReviewDestination(_ fileURL: URL?) -> Bool {
+        fileURL?.pathExtension.caseInsensitiveCompare("md") == .orderedSame
+    }
+
+    static func prepareReviewDestination(for document: NSDocument) {
+        document.fileType = UTType.markReview.identifier
+    }
+
+    static func save(_ document: NSDocument, delegate: AnyObject, didSave selector: Selector) {
+        if requiresReviewDestination(document.fileURL) {
+            prepareReviewDestination(for: document)
+            document.runModalSavePanel(
+                for: .saveAsOperation,
+                delegate: delegate,
+                didSave: selector,
+                contextInfo: nil
+            )
+        } else {
+            document.save(
+                withDelegate: delegate,
+                didSave: selector,
+                contextInfo: nil
+            )
+        }
     }
 }
 
@@ -130,10 +160,10 @@ final class ReviewWindowCloseGuard: NSObject, NSWindowDelegate {
         if let window {
             pendingWindow = window
         }
-        document.save(
-            withDelegate: self,
-            didSave: #selector(documentDidSave(_:didSave:contextInfo:)),
-            contextInfo: nil
+        MarkReviewSavePolicy.save(
+            document,
+            delegate: self,
+            didSave: #selector(documentDidSave(_:didSave:contextInfo:))
         )
     }
 

@@ -18,7 +18,7 @@ prompt is ready.
 
 MarkReview makes that work feel like reviewing a document:
 
-- Open any Markdown file. The original file stays unchanged.
+- Open any Markdown file as a read-only source. MarkReview never overwrites it.
 - Select text to add a comment, or Option-click a block to comment on the whole
   paragraph, heading, list item, or code block.
 - See every comment beside the passage it refers to.
@@ -26,7 +26,9 @@ MarkReview makes that work feel like reviewing a document:
   act on it.
 - Close the app and continue another day. Your saved review and open windows
   come back when you return.
-- Save the review and send the `.markreview` file to the agent.
+- The first Save asks where to create the `.markreview` file. Later saves update
+  that review file directly.
+- Send the `.markreview` file to the agent.
 
 ## A complete prompt in one file
 

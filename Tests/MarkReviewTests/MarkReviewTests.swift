@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Combine
 import Testing
+import UniformTypeIdentifiers
 @testable import MarkReview
 
 @Test("review document round-trips with annotations")
@@ -85,6 +86,39 @@ func documentContentTypesKeepMarkdownImportOnly() {
     #expect(MarkReviewDocument.readableContentTypes.contains(.markReviewMarkdown))
     #expect(MarkReviewDocument.readableContentTypes.contains(.markReview))
     #expect(MarkReviewDocument.writableContentTypes == [.markReview])
+}
+
+@Test("Markdown sources always require a review destination")
+@MainActor
+func markdownSourcesRequireReviewDestination() {
+    #expect(MarkReviewSavePolicy.requiresReviewDestination(URL(fileURLWithPath: "/tmp/Review.md")))
+    #expect(MarkReviewSavePolicy.requiresReviewDestination(URL(fileURLWithPath: "/tmp/Review.MD")))
+    #expect(!MarkReviewSavePolicy.requiresReviewDestination(URL(fileURLWithPath: "/tmp/Review.markreview")))
+    #expect(!MarkReviewSavePolicy.requiresReviewDestination(nil))
+}
+
+@Test("saving a Markdown source switches the native writable type")
+@MainActor
+func markdownSavePolicySelectsReviewType() {
+    let document = NSDocument()
+    document.fileURL = URL(fileURLWithPath: "/tmp/Review.md")
+    document.fileType = UTType.markReviewMarkdown.identifier
+
+    #expect(MarkReviewSavePolicy.requiresReviewDestination(document.fileURL))
+    MarkReviewSavePolicy.prepareReviewDestination(for: document)
+    #expect(document.fileType == UTType.markReview.identifier)
+    #expect(document.fileURL?.pathExtension == "md")
+}
+
+@Test("the serializer refuses Markdown destinations")
+func serializerRefusesMarkdownDestinations() throws {
+    let document = MarkReviewDocument(title: "Review", originalMarkdown: "# Source")
+
+    #expect(throws: MarkReviewDocumentWriteError.self) {
+        _ = try document.snapshot(contentType: .markReviewMarkdown)
+    }
+    let snapshot = try document.snapshot(contentType: .markReview)
+    #expect(snapshot.originalMarkdown == "# Source")
 }
 
 @Test("renumbering follows Markdown order")

@@ -38,12 +38,28 @@ extension MarkReviewDocument {
     }
 
     public func snapshot(contentType: UTType) throws -> MarkReviewDocument {
-        copy()
+        try Self.requireWritableReviewType(contentType)
+        return copy()
     }
 
     public func fileWrapper(snapshot: MarkReviewDocument, configuration: FileDocumentWriteConfiguration) throws -> FileWrapper {
+        try Self.requireWritableReviewType(configuration.contentType)
         let data = try JSONEncoder.markReview.encode(snapshot)
         return FileWrapper(regularFileWithContents: data)
+    }
+
+    private static func requireWritableReviewType(_ contentType: UTType) throws {
+        guard contentType.conforms(to: .markReview) else {
+            throw MarkReviewDocumentWriteError.markdownIsReadOnly
+        }
+    }
+}
+
+enum MarkReviewDocumentWriteError: LocalizedError {
+    case markdownIsReadOnly
+
+    var errorDescription: String? {
+        "Markdown files are read-only in MarkReview. Save the review as a .markreview file."
     }
 }
 

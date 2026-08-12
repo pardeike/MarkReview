@@ -806,7 +806,10 @@ struct ContentView: View {
         let wasDirty = changeState.isDirty(document.id)
         changeState.markDirty(document.id)
         if !wasDirty {
-            activeNativeDocument()?.updateChangeCount(.changeDone)
+            let nativeDocument = activeNativeDocument()
+            if !MarkReviewSavePolicy.requiresReviewDestination(nativeDocument?.fileURL) {
+                nativeDocument?.updateChangeCount(.changeDone)
+            }
         }
         documentRevision &+= 1
     }
