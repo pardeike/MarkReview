@@ -106,6 +106,28 @@ func renumberTopDown() {
     #expect(document.annotations.map(\.sequence) == [1, 2])
 }
 
+@Test("deleting an annotation closes the sequence gap without reordering")
+func deletingAnnotationClosesSequenceGapWithoutReordering() {
+    let firstID = UUID()
+    let deletedID = UUID()
+    let lastID = UUID()
+    var document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: "First\n\nSecond\n\nThird",
+        annotations: [
+            ReviewAnnotation(id: firstID, sequence: 1, kind: .text, selectedText: "First", contextBefore: "", contextAfter: "", blockText: "First", section: "", comment: "First"),
+            ReviewAnnotation(id: deletedID, sequence: 2, kind: .text, selectedText: "Second", contextBefore: "", contextAfter: "", blockText: "Second", section: "", comment: "Second"),
+            ReviewAnnotation(id: lastID, sequence: 3, kind: .text, selectedText: "Third", contextBefore: "", contextAfter: "", blockText: "Third", section: "", comment: "Third")
+        ]
+    )
+
+    document.remove(id: deletedID)
+
+    #expect(document.annotations.map(\.id) == [firstID, lastID])
+    #expect(document.annotations.map(\.sequence) == [1, 2])
+    #expect(document.annotations.map(\.selectedText) == ["First", "Third"])
+}
+
 @Test("renumbering recovers positions from rendered Markdown syntax")
 func renumberTopDownRecoversRenderedMarkdownPositions() {
     let earlier = ReviewAnnotation(

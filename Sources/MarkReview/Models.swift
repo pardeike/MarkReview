@@ -221,7 +221,12 @@ public struct MarkReviewDocument: Codable, Equatable {
     }
 
     public mutating func remove(id: UUID) {
-        annotations.removeAll { $0.id == id }
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        let removedSequence = annotations[index].sequence
+        annotations.remove(at: index)
+        for index in annotations.indices where annotations[index].sequence > removedSequence {
+            annotations[index].sequence -= 1
+        }
     }
 
     public mutating func renumberTopDown() {
