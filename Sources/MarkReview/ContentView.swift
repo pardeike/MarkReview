@@ -273,7 +273,11 @@ struct ContentView: View {
                             if request.anchor == .bottom {
                                 DispatchQueue.main.async {
                                     scroll()
-                                    pendingBottomScrollID = nil
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                        if pendingBottomScrollID == request.id {
+                                            pendingBottomScrollID = nil
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -608,6 +612,7 @@ struct ContentView: View {
     }
 
     private func syncFromSidebarScroll(_ frames: [CommentFrame]) {
+        guard pendingBottomScrollID == nil else { return }
         guard !frames.isEmpty else { return }
         let target = frames.min { lhs, rhs in
             abs(lhs.minY - 8) < abs(rhs.minY - 8)
