@@ -167,7 +167,7 @@ struct ContentView: View {
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewBlue.opacity(0.32), lineWidth: 1))
         .contentShape(Rectangle())
-        .id(id)
+        .id("draft-\(id.uuidString)")
         .background(GeometryReader { geometry in
             Color.clear.preference(
                 key: CommentFramePreferenceKey.self,
@@ -215,7 +215,7 @@ struct ContentView: View {
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewBlue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
-        .id(value.id)
+        .id("annotation-\(value.id.uuidString)")
         .background(GeometryReader { geometry in
             Color.clear.preference(
                 key: CommentFramePreferenceKey.self,
