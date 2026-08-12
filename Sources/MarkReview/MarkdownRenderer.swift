@@ -202,12 +202,25 @@ private enum HTMLPage {
           const occupiedTops = Array.from(block.querySelectorAll('.review-marker')).map(existing => parseFloat(existing.style.top) || 0);
           while (occupiedTops.some(existing => Math.abs(existing - top) < 22)) top += 29;
           marker.style.top = Math.max(0, top) + 'px';
+          positionMarker(marker, blockRect);
           marker.addEventListener('pointerdown', event => {
             event.preventDefault();
             event.stopPropagation();
             review()?.postMessage({ type: 'focusAnnotation', id: item.id });
           });
           block.appendChild(marker);
+        }
+
+        function positionMarker(marker, blockRect = marker.parentElement?.getBoundingClientRect()) {
+          if (!blockRect) return;
+          const documentRect = root.getBoundingClientRect();
+          marker.style.left = (documentRect.left - blockRect.left - 38) + 'px';
+        }
+
+        function positionMarkers() {
+          document.querySelectorAll('.review-marker').forEach(marker => {
+            positionMarker(marker);
+          });
         }
 
         function outlinePath(rectangles) {
@@ -265,6 +278,7 @@ private enum HTMLPage {
             path.setAttribute('d', outlinePath(Array.from(range.getClientRects())));
             layer.appendChild(path);
           });
+          positionMarkers();
           window.setSelectedAnnotation(window.selectedReviewAnnotationID || null);
         }
 

@@ -202,6 +202,15 @@ func sourceLineHintsIgnoreMarkdownSyntax() {
     ) == (3, 3))
 }
 
+@Test("preview positions review markers from the document rail")
+func previewPositionsMarkersFromDocumentRail() {
+    let rendered = MarkdownRenderer().render("1. First item")
+
+    #expect(rendered.contains("positionMarker(marker, blockRect)"))
+    #expect(rendered.contains("documentRect.left - blockRect.left - 38"))
+    #expect(rendered.contains("positionMarkers()"))
+}
+
 @Test("preview review colors come from the macOS accent color")
 func previewUsesSystemAccentColor() {
     let rendered = MarkdownRenderer().render("# Review")
