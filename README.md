@@ -42,8 +42,8 @@ swift run MarkReview
    the new selection. Once a remark contains text, it becomes a saved annotation
    and a later selection starts the next numbered item.
 4. Click a review item to focus its remark and bring its highlighted passage
-   into view near the top quarter of the Markdown page. The matching blue
-   number is shown beside the passage on the left.
+   into view near the top quarter of the Markdown page. The matching number,
+   tinted with your macOS accent color, is shown beside the passage on the left.
 5. Save the review as `Document.markreview`. MarkReview keeps the original
    Markdown inside that document and never modifies the source `.md` file.
 6. Choose **File > Export Agent JSON…** and give the exported JSON to the

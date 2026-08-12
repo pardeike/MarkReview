@@ -180,6 +180,18 @@ func sourceLineHintsIgnoreMarkdownSyntax() {
     ) == (3, 3))
 }
 
+@Test("preview review colors come from the macOS accent color")
+func previewUsesSystemAccentColor() {
+    let rendered = MarkdownRenderer().render("# Review")
+    let accent = SystemAccentPalette.current
+
+    #expect(rendered.contains(accent.cssRGBA(alpha: 0.45)))
+    #expect(rendered.contains(accent.cssRGBA(alpha: 0.82)))
+    #expect(rendered.contains(accent.cssRGBA()))
+    #expect(!rendered.contains("#60a5fa"))
+    #expect(!rendered.contains("rgba(0, 122, 255"))
+}
+
 @Test("region updates preserve the existing annotation identity")
 func regionUpdatePreservesAnnotationIdentity() {
     let id = UUID()

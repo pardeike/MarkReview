@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 
 private extension Color {
-    static let reviewBlue = Color(red: 0, green: 122.0 / 255.0, blue: 1)
+    static var reviewAccent: Color {
+        Color(nsColor: SystemAccentPalette.current.nsColor)
+    }
 }
 
 private enum SidebarScrollAnchor: Equatable {
@@ -164,6 +166,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 680)
+        .tint(Color(nsColor: NSColor.controlAccentColor))
         .navigationTitle(document.title)
         .focusedSceneValue(\.markReviewActions, MarkReviewActions(
             importMarkdown: importMarkdown,
@@ -305,7 +308,7 @@ struct ContentView: View {
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewBlue.opacity(0.32), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewAccent.opacity(0.32), lineWidth: 1))
         .contentShape(Rectangle())
         .id("draft-\(id.uuidString)")
         .onTapGesture { selectDraft(id: id) }
@@ -350,7 +353,7 @@ struct ContentView: View {
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewBlue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewAccent.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
         .id("annotation-\(value.id.uuidString)")
         .onTapGesture { selectAnnotation(value.id) }
@@ -361,11 +364,11 @@ struct ContentView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .background(selected ? Color.reviewBlue : Color.reviewBlue.opacity(0.45), in: Circle())
+            .background(selected ? Color.reviewAccent : Color.reviewAccent.opacity(0.45), in: Circle())
             .overlay {
                 if selected {
                     Circle()
-                        .stroke(Color.reviewBlue.opacity(0.35), lineWidth: 3)
+                        .stroke(Color.reviewAccent.opacity(0.35), lineWidth: 3)
                         .padding(-3)
                 }
             }

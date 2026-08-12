@@ -5,7 +5,13 @@ struct MarkdownRenderer {
     func render(_ markdown: String) -> String {
         let document = Document(parsing: markdown)
         let body = HTMLFormatter.format(document)
-        return HTMLPage.template.replacingOccurrences(of: "__MARKDOWN_BODY__", with: body)
+        let accent = SystemAccentPalette.current
+        return HTMLPage.template
+            .replacingOccurrences(of: "__REVIEW_ACCENT_MUTED__", with: accent.cssRGBA(alpha: 0.45))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_OUTLINE__", with: accent.cssRGBA(alpha: 0.82))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_SELECTED__", with: accent.cssRGBA())
+            .replacingOccurrences(of: "__REVIEW_ACCENT_RING__", with: accent.cssRGBA(alpha: 0.24))
+            .replacingOccurrences(of: "__MARKDOWN_BODY__", with: body)
     }
 
     func sourceLineHints(for region: SelectedRegion, in markdown: String) -> (Int?, Int?) {
@@ -44,11 +50,11 @@ private enum HTMLPage {
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         .review-annotated-block { position: relative; }
         #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }
-        .review-outline { fill: none; stroke: rgba(147, 197, 253, .95); stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
-        .review-outline.review-selected { stroke: #60a5fa; }
-        .review-marker { position: absolute; left: -38px; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: rgba(0, 122, 255, .45); box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; }
+        .review-outline { fill: none; stroke: __REVIEW_ACCENT_OUTLINE__; stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
+        .review-outline.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; }
+        .review-marker { position: absolute; left: -38px; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; }
         .review-marker.review-resolved { background: #94a3b8; }
-        .review-marker.review-selected { background: #007aff; box-shadow: 0 0 0 3px rgba(0, 122, 255, .24), 0 1px 3px rgba(0,0,0,.18); }
+        .review-marker.review-selected { background: __REVIEW_ACCENT_SELECTED__; box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 1px 3px rgba(0,0,0,.18); }
         #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: 12px; pointer-events: none; }
       </style>
     </head>
