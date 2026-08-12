@@ -4,6 +4,7 @@ import AppKit
 struct MarkReviewActions {
     let importMarkdown: () -> Void
     let exportAgentJSON: () -> Void
+    let renumberAnnotations: () -> Void
     let canExportAgentJSON: Bool
 }
 
@@ -41,6 +42,15 @@ struct MarkReviewCommands: Commands {
             }
             .keyboardShortcut("e", modifiers: [.command, .option])
             .disabled(actions?.canExportAgentJSON == false)
+
+            Button("Renumber Comments") {
+                if let actions {
+                    actions.renumberAnnotations()
+                } else {
+                    NotificationCenter.default.post(name: .markReviewDocumentRenumber, object: nil)
+                }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
         }
     }
 }
@@ -48,6 +58,7 @@ struct MarkReviewCommands: Commands {
 extension Notification.Name {
     static let markReviewDocumentImport = Notification.Name("MarkReviewDocumentImport")
     static let markReviewDocumentExport = Notification.Name("MarkReviewDocumentExport")
+    static let markReviewDocumentRenumber = Notification.Name("MarkReviewDocumentRenumber")
 }
 
 final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {

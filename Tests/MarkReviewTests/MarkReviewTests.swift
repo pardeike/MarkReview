@@ -67,3 +67,41 @@ func agentExportOmitsEmptyComments() {
     let export = AgentExport(document: document)
     #expect(export.annotations.map(\.number) == [2])
 }
+
+@Test("renumbering follows Markdown order")
+func renumberTopDown() {
+    let first = ReviewAnnotation(
+        sequence: 2,
+        kind: .text,
+        selectedText: "First passage",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "First passage",
+        section: "First",
+        comment: "First comment.",
+        sourceLineStart: 3,
+        sourceLineEnd: 3
+    )
+    let second = ReviewAnnotation(
+        sequence: 1,
+        kind: .text,
+        selectedText: "Second passage",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "Second passage",
+        section: "Second",
+        comment: "Second comment.",
+        sourceLineStart: 7,
+        sourceLineEnd: 7
+    )
+    var document = MarkReviewDocument(
+        title: "Review",
+        originalMarkdown: "# First\n\nFirst passage\n\n# Second\n\nSecond passage",
+        annotations: [second, first]
+    )
+
+    document.renumberTopDown()
+
+    #expect(document.annotations.map(\.selectedText) == ["First passage", "Second passage"])
+    #expect(document.annotations.map(\.sequence) == [1, 2])
+}

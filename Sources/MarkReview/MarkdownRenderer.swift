@@ -81,11 +81,11 @@ private enum HTMLPage {
         table { border-collapse: collapse; width: 100%; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         .review-annotated-block { position: relative; }
-        .review-highlight { background: rgba(147, 197, 253, .56); border-bottom: 2px solid #60a5fa; border-radius: 2px; }
-        .review-highlight.review-selected { background: rgba(96, 165, 250, .48); outline: 2px solid rgba(37, 99, 235, .38); outline-offset: 1px; }
-        .review-marker { position: absolute; left: -38px; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: #2563eb; box-shadow: 0 1px 3px rgba(0,0,0,.18); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; }
+        .review-highlight { color: inherit; background: rgba(147, 197, 253, .56); border-bottom: 2px solid #60a5fa; border-radius: 2px; }
+        .review-highlight.review-selected { color: inherit; background: rgba(0, 122, 255, .30); border-bottom-color: #007aff; }
+        .review-marker { position: absolute; left: -38px; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: rgba(0, 122, 255, .45); box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; }
         .review-marker.review-resolved { background: #94a3b8; }
-        .review-marker.review-selected { box-shadow: 0 0 0 3px rgba(37, 99, 235, .24), 0 1px 3px rgba(0,0,0,.18); }
+        .review-marker.review-selected { background: #007aff; box-shadow: 0 0 0 3px rgba(0, 122, 255, .24), 0 1px 3px rgba(0,0,0,.18); }
         #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: 12px; pointer-events: none; }
       </style>
     </head>
@@ -179,7 +179,7 @@ private enum HTMLPage {
           }
         }
 
-        function addMarker(block, item, offset) {
+        function addMarker(block, item, lineRect) {
           block.classList.add('review-annotated-block');
           const marker = document.createElement('button');
           marker.className = 'review-marker' + (item.status === 'resolved' ? ' review-resolved' : '');
@@ -187,7 +187,11 @@ private enum HTMLPage {
           marker.dataset.reviewMarker = 'true';
           marker.textContent = item.sequence;
           marker.setAttribute('aria-label', 'Review ' + item.sequence);
-          marker.style.top = (offset * 29) + 'px';
+          const blockRect = block.getBoundingClientRect();
+          let top = lineRect.top - blockRect.top + (lineRect.height - 24) / 2;
+          const occupiedTops = Array.from(block.querySelectorAll('.review-marker')).map(existing => parseFloat(existing.style.top) || 0);
+          while (occupiedTops.some(existing => Math.abs(existing - top) < 22)) top += 29;
+          marker.style.top = Math.max(0, top) + 'px';
           marker.addEventListener('pointerdown', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -202,11 +206,12 @@ private enum HTMLPage {
           const block = blockFor(range.startContainer.parentElement);
           const mark = document.createElement('mark');
           mark.className = 'review-highlight'; mark.dataset.annotationId = item.id;
+          const firstLine = range.getClientRects()[0] || range.getBoundingClientRect();
           try {
             mark.appendChild(range.extractContents());
             range.insertNode(mark);
           } catch (_) { return; }
-          addMarker(block, item, block.querySelectorAll('.review-marker').length);
+          addMarker(block, item, firstLine);
         }
 
         window.setAnnotations = annotations => {

@@ -48,6 +48,8 @@ swift run MarkReview
    Markdown inside that document and never modifies the source `.md` file.
 6. Choose **File > Export Agent JSON…** and give the exported JSON to the
    agent. Empty, unfinished items are not exported.
+7. Use **File > Renumber Comments** whenever you want the item numbers reset
+   to the document's top-down order.
 
 MarkReview is a macOS document app: its open review documents are restored
 after the app is quit and relaunched, and each document's complete window frame

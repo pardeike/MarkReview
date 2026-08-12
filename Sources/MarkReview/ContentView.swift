@@ -57,6 +57,7 @@ struct ContentView: View {
         .focusedSceneValue(\.markReviewActions, MarkReviewActions(
             importMarkdown: importMarkdown,
             exportAgentJSON: exportAgentJSON,
+            renumberAnnotations: renumberAnnotations,
             canExportAgentJSON: !document.originalMarkdown.isEmpty
         ))
         .background(WindowFrameObserver(identifier: document.id.uuidString))
@@ -65,6 +66,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentExport)) { _ in
             exportAgentJSON()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentRenumber)) { _ in
+            renumberAnnotations()
         }
         .onChange(of: focusedComment) { _, focus in
             switch focus {
@@ -222,7 +226,7 @@ struct ContentView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .background(Color.blue, in: Circle())
+            .background(selected ? Color.blue : Color.blue.opacity(0.45), in: Circle())
             .overlay {
                 if selected {
                     Circle()
@@ -301,6 +305,19 @@ struct ContentView: View {
     }
 
     private func handleRegion(_ region: SelectedRegion) {
+        if let overlappingID = overlappingAnnotationID(for: region) {
+            if draftRegion != nil, !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                _ = promoteDraft()
+            }
+            draftRegion = nil
+            draftID = nil
+            draftComment = ""
+            updateAnnotationRegion(overlappingID, with: region)
+            selectedAnnotationID = overlappingID
+            focusedComment = .annotation(overlappingID)
+            return
+        }
+
         if draftRegion != nil {
             if draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.draftRegion = region
@@ -315,6 +332,51 @@ struct ContentView: View {
         draftComment = ""
         selectedAnnotationID = draftID
         focusDraft()
+    }
+
+    private func updateAnnotationRegion(_ id: UUID, with region: SelectedRegion) {
+        let lines = renderer.sourceLineHints(for: region, in: document.originalMarkdown)
+        document.updateRegion(
+            for: id,
+            kind: region.kind,
+            selectedText: region.selectedText,
+            contextBefore: region.contextBefore,
+            contextAfter: region.contextAfter,
+            blockText: region.blockText,
+            section: region.section,
+            sourceLineStart: lines.0,
+            sourceLineEnd: lines.1
+        )
+    }
+
+    private func overlappingAnnotationID(for region: SelectedRegion) -> UUID? {
+        let newSelection = normalizeForOverlap(region.selectedText)
+        guard !newSelection.isEmpty else { return nil }
+        let newBlock = normalizeForOverlap(region.blockText)
+
+        return document.annotations.first { annotation in
+            let existingSelection = normalizeForOverlap(annotation.selectedText)
+            guard !existingSelection.isEmpty else { return false }
+
+            if newSelection.contains(existingSelection) || existingSelection.contains(newSelection) {
+                return true
+            }
+
+            let existingBlock = normalizeForOverlap(annotation.blockText)
+            guard !newBlock.isEmpty, existingBlock == newBlock else { return false }
+            let block = newBlock as NSString
+            let existingRange = block.range(of: existingSelection)
+            let newRange = block.range(of: newSelection)
+            guard existingRange.location != NSNotFound, newRange.location != NSNotFound else { return false }
+            return NSIntersectionRange(existingRange, newRange).length > 0
+        }?.id
+    }
+
+    private func normalizeForOverlap(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private func promoteDraft() -> UUID? {
@@ -344,6 +406,13 @@ struct ContentView: View {
     private func selectAnnotation(_ id: UUID) {
         selectedAnnotationID = id
         focusedComment = .annotation(id)
+    }
+
+    private func renumberAnnotations() {
+        document.renumberTopDown()
+        if let selectedAnnotationID {
+            sidebarTargetID = selectedAnnotationID
+        }
     }
 
     private func handlePreviewVisibility(_ id: UUID) {

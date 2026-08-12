@@ -119,8 +119,59 @@ public struct MarkReviewDocument: Codable, Equatable {
         annotations[index].comment = comment
     }
 
+    public mutating func updateRegion(
+        for id: UUID,
+        kind: AnnotationKind,
+        selectedText: String,
+        contextBefore: String,
+        contextAfter: String,
+        blockText: String,
+        section: String,
+        sourceLineStart: Int?,
+        sourceLineEnd: Int?
+    ) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].kind = kind
+        annotations[index].selectedText = selectedText
+        annotations[index].contextBefore = contextBefore
+        annotations[index].contextAfter = contextAfter
+        annotations[index].blockText = blockText
+        annotations[index].section = section
+        annotations[index].sourceLineStart = sourceLineStart
+        annotations[index].sourceLineEnd = sourceLineEnd
+    }
+
     public mutating func remove(id: UUID) {
         annotations.removeAll { $0.id == id }
+    }
+
+    public mutating func renumberTopDown() {
+        let normalizedMarkdown = Self.normalizeForOrdering(originalMarkdown)
+        var reordered = annotations
+        reordered.sort { lhs, rhs in
+            let lhsPosition = Self.topDownPosition(for: lhs, in: normalizedMarkdown)
+            let rhsPosition = Self.topDownPosition(for: rhs, in: normalizedMarkdown)
+            if lhsPosition != rhsPosition { return lhsPosition < rhsPosition }
+            return lhs.sequence < rhs.sequence
+        }
+        for index in reordered.indices {
+            reordered[index].sequence = index + 1
+        }
+        annotations = reordered
+    }
+
+    private static func topDownPosition(for annotation: ReviewAnnotation, in normalizedMarkdown: String) -> (Int, Int) {
+        let line = annotation.sourceLineStart ?? Int.max
+        let selected = Self.normalizeForOrdering(annotation.selectedText)
+        let offset = selected.isEmpty ? Int.max : (normalizedMarkdown as NSString).range(of: selected).location
+        return (line, offset == NSNotFound ? Int.max : offset)
+    }
+
+    private static func normalizeForOrdering(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }
 
