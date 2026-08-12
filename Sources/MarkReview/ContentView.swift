@@ -6,6 +6,7 @@ private extension Color {
 }
 
 private enum SidebarScrollAnchor: Equatable {
+    case top
     case center
     case bottom
 }
@@ -139,7 +140,7 @@ struct ContentView: View {
                         html: renderer.render(document.originalMarkdown),
                         annotations: previewAnnotations,
                         onRegion: handleRegion,
-                        onFocusAnnotation: selectAnnotation,
+                        onFocusAnnotation: selectAnnotationFromPreview,
                         onVisibleAnnotation: handlePreviewVisibility,
                         selectedAnnotationID: selectedAnnotationID,
                         focusRequest: previewFocusRequest
@@ -249,7 +250,15 @@ struct ContentView: View {
                         let targetID = request.id == draftID
                             ? "draft-\(request.id.uuidString)"
                             : "annotation-\(request.id.uuidString)"
-                        let anchor: UnitPoint = request.anchor == .bottom ? .bottom : .center
+                        let anchor: UnitPoint
+                        switch request.anchor {
+                        case .top:
+                            anchor = .top
+                        case .center:
+                            anchor = .center
+                        case .bottom:
+                            anchor = .bottom
+                        }
                         let scroll = {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 proxy.scrollTo(targetID, anchor: anchor)
@@ -571,6 +580,11 @@ struct ContentView: View {
         selectedAnnotationID = id
         requestPreviewFocus(id)
         focusedComment = .annotation(id)
+    }
+
+    private func selectAnnotationFromPreview(_ id: UUID) {
+        selectAnnotation(id)
+        sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .top)
     }
 
     private func renumberAnnotations() {
