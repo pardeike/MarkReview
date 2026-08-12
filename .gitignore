@@ -1,0 +1,6 @@
+.build/
+DerivedData/
+MarkReview.app/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+.DS_Store
