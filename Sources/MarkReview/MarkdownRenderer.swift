@@ -53,9 +53,11 @@ private enum HTMLPage {
         #review-marker-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 3; overflow: visible; pointer-events: none; }
         .review-outline { fill: none; stroke: __REVIEW_ACCENT_OUTLINE__; stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
         .review-outline.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; }
-        .review-marker { position: absolute; left: 0; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: auto; }
+        .review-marker { position: absolute; left: 0; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: auto; transform: translateX(var(--stack-offset, 0px)); transition: transform .12s ease, box-shadow .12s ease; }
+        .review-marker.review-selected { z-index: 10; background: __REVIEW_ACCENT_SELECTED__; box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 1px 3px rgba(0,0,0,.18); }
+        .review-marker:hover { z-index: 100; transform: translateX(var(--stack-offset, 0px)) scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.28); }
+        .review-marker.review-selected:hover { box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 2px 6px rgba(0,0,0,.28); }
         .review-marker.review-resolved { background: #94a3b8; }
-        .review-marker.review-selected { background: __REVIEW_ACCENT_SELECTED__; box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 1px 3px rgba(0,0,0,.18); }
         #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: 12px; pointer-events: none; }
       </style>
     </head>
@@ -242,20 +244,15 @@ private enum HTMLPage {
           marker.className = 'review-marker' + (item.status === 'resolved' ? ' review-resolved' : '');
           marker.dataset.annotationId = item.id;
           marker.dataset.reviewMarker = 'true';
-          if (!block.dataset.reviewMarkerBlockID) {
-            block.dataset.reviewMarkerBlockID = 'review-block-' + Math.random().toString(36).slice(2);
-          }
-          marker.dataset.blockID = block.dataset.reviewMarkerBlockID;
           marker.textContent = item.sequence;
           marker.setAttribute('aria-label', 'Review ' + item.sequence);
           const markerLayer = document.getElementById('review-marker-layer');
           if (!markerLayer) return;
-          const baseTop = (lineRect.height - 24) / 2;
-          let top = baseTop;
-          const occupiedTops = Array.from(markerLayer.querySelectorAll(`[data-block-id="${marker.dataset.blockID}"]`))
-            .map(existing => parseFloat(existing.dataset.verticalOffset || '0'));
-          while (occupiedTops.some(existing => Math.abs(existing - top) < 22)) top += 29;
-          marker.dataset.verticalOffset = String(top);
+          const rowTop = lineRect.top + (lineRect.height - 24) / 2;
+          const sameRowMarkers = Array.from(markerLayer.querySelectorAll('.review-marker'))
+            .filter(existing => Math.abs(parseFloat(existing.dataset.rowTop || 'NaN') - rowTop) < 8);
+          marker.dataset.rowTop = String(rowTop);
+          marker.style.setProperty('--stack-offset', Math.min(sameRowMarkers.length * 5, 16) + 'px');
           marker.addEventListener('pointerdown', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -268,9 +265,8 @@ private enum HTMLPage {
         function positionMarker(marker, lineRect = reviewRanges.get(marker.dataset.annotationId)?.getClientRects()[0]) {
           if (!lineRect) return;
           const documentRect = root.getBoundingClientRect();
-          const verticalOffset = parseFloat(marker.dataset.verticalOffset || '0');
           marker.style.left = (documentRect.left - 38) + 'px';
-          marker.style.top = (lineRect.top + verticalOffset) + 'px';
+          marker.style.top = (lineRect.top + (lineRect.height - 24) / 2) + 'px';
         }
 
         function positionMarkers() {

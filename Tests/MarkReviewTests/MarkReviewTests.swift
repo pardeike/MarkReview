@@ -230,6 +230,17 @@ func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
     #expect(rendered.contains("expectedAfter && candidateAfter.startsWith(expectedAfter)"))
 }
 
+@Test("preview stacks same-row review markers for hover inspection")
+func previewStacksSameRowReviewMarkersForHoverInspection() {
+    let rendered = MarkdownRenderer().render("First repeated text")
+
+    #expect(rendered.contains("--stack-offset"))
+    #expect(rendered.contains("sameRowMarkers"))
+    #expect(rendered.contains(".review-marker:hover"))
+    #expect(rendered.contains(".review-marker.review-selected:hover"))
+    #expect(rendered.contains("z-index: 100"))
+}
+
 @Test("preview review colors come from the macOS accent color")
 func previewUsesSystemAccentColor() {
     let rendered = MarkdownRenderer().render("# Review")
