@@ -5,6 +5,7 @@ import WebKit
 struct PreviewFocusRequest: Equatable {
     let annotationID: UUID
     let token: Int
+    let selectsAnnotation: Bool
 }
 
 struct PreviewWebView: NSViewRepresentable {
@@ -119,7 +120,7 @@ struct PreviewWebView: NSViewRepresentable {
                   appliedFocusRequestToken != request.token else { return }
             appliedFocusRequestToken = request.token
             let value = "\"\(request.annotationID.uuidString)\""
-            webView.evaluateJavaScript("window.focusAnnotation(\(value));")
+            webView.evaluateJavaScript("window.focusAnnotation(\(value), \(request.selectsAnnotation ? "true" : "false"));")
         }
     }
 }

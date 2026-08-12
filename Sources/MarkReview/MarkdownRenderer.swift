@@ -326,8 +326,8 @@ private enum HTMLPage {
           if (!id) return;
           document.querySelectorAll(`[data-annotation-id="${id}"]`).forEach(element => element.classList.add('review-selected'));
         };
-        window.focusAnnotation = id => {
-          window.setSelectedAnnotation(id);
+        window.focusAnnotation = (id, selectsAnnotation = true) => {
+          if (selectsAnnotation) window.setSelectedAnnotation(id);
           const marker = document.querySelector(`.review-marker[data-annotation-id="${id}"]`);
           const target = marker?.closest('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,td,th') || marker;
           if (!target) return;

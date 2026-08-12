@@ -134,6 +134,7 @@ struct ContentView: View {
     @State private var focusedComment: CommentFocus?
     @State private var nextPreviewFocusToken = 0
     @State private var previewFocusRequest: PreviewFocusRequest?
+    @State private var lastSidebarFollowID: UUID?
 
     private let renderer = MarkdownRenderer()
 
@@ -275,6 +276,7 @@ struct ContentView: View {
                                     scroll()
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                         if pendingBottomScrollID == request.id {
+                                            lastSidebarFollowID = request.id
                                             pendingBottomScrollID = nil
                                         }
                                     }
@@ -581,9 +583,14 @@ struct ContentView: View {
         focusDraft()
     }
 
-    private func requestPreviewFocus(_ id: UUID) {
+    private func requestPreviewFocus(_ id: UUID, selectsAnnotation: Bool = true) {
         nextPreviewFocusToken += 1
-        previewFocusRequest = PreviewFocusRequest(annotationID: id, token: nextPreviewFocusToken)
+        lastSidebarFollowID = id
+        previewFocusRequest = PreviewFocusRequest(
+            annotationID: id,
+            token: nextPreviewFocusToken,
+            selectsAnnotation: selectsAnnotation
+        )
     }
 
     private func scrollDraftToBottom(_ id: UUID) {
@@ -617,9 +624,8 @@ struct ContentView: View {
         let target = frames.min { lhs, rhs in
             abs(lhs.minY - 8) < abs(rhs.minY - 8)
         }
-        guard let id = target?.id, selectedAnnotationID != id else { return }
-        selectedAnnotationID = id
-        requestPreviewFocus(id)
+        guard let id = target?.id, lastSidebarFollowID != id else { return }
+        requestPreviewFocus(id, selectsAnnotation: false)
     }
 
     private func focusDraft() {
