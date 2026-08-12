@@ -67,6 +67,10 @@ final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
         SessionRestoration.shared.restoreLastSession()
     }
 
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         SessionRestoration.shared.prepareForTermination()
     }
