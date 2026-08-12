@@ -358,7 +358,7 @@ struct ContentView: View {
         guard !newSelection.isEmpty else { return nil }
         let newBlock = normalizeForOverlap(region.blockText)
 
-        return document.annotations.first { annotation in
+        let matches = document.annotations.filter { annotation in
             let existingSelection = normalizeForOverlap(annotation.selectedText)
             guard !existingSelection.isEmpty else { return false }
 
@@ -373,7 +373,10 @@ struct ContentView: View {
             let newRange = block.range(of: newSelection)
             guard existingRange.location != NSNotFound, newRange.location != NSNotFound else { return false }
             return NSIntersectionRange(existingRange, newRange).length > 0
-        }?.id
+        }
+
+        guard matches.count == 1 else { return nil }
+        return matches[0].id
     }
 
     private func normalizeForOverlap(_ value: String) -> String {

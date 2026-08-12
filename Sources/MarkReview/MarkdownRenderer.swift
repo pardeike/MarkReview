@@ -81,8 +81,10 @@ private enum HTMLPage {
         table { border-collapse: collapse; width: 100%; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         .review-annotated-block { position: relative; }
-        .review-highlight { color: inherit; background: rgba(147, 197, 253, .56); border-bottom: 2px solid #60a5fa; border-radius: 2px; }
-        .review-highlight.review-selected { color: inherit; background: rgba(0, 122, 255, .30); border-bottom-color: #007aff; }
+        .review-highlight { color: inherit; background: transparent; border: 0; padding: 0; }
+        #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }
+        .review-outline { fill: none; stroke: rgba(147, 197, 253, .95); stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
+        .review-outline.review-selected { stroke: #60a5fa; }
         .review-marker { position: absolute; left: -38px; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: rgba(0, 122, 255, .45); box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; }
         .review-marker.review-resolved { background: #94a3b8; }
         .review-marker.review-selected { background: #007aff; box-shadow: 0 0 0 3px rgba(0, 122, 255, .24), 0 1px 3px rgba(0,0,0,.18); }
@@ -162,21 +164,56 @@ private enum HTMLPage {
           });
           document.querySelectorAll('.review-marker').forEach(marker => marker.remove());
           document.querySelectorAll('.review-annotated-block').forEach(block => block.classList.remove('review-annotated-block'));
+          document.getElementById('review-outline-layer')?.remove();
         }
 
         function findTextRange(text) {
-          if (!text) return;
+          const target = (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!target) return;
+
           const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          const characters = [];
           while (walker.nextNode()) {
             const node = walker.currentNode;
+            if (node.parentElement?.closest('.review-marker')) continue;
             const value = node.nodeValue || '';
-            const index = value.toLowerCase().indexOf(text.toLowerCase());
-            if (index >= 0) {
-              const range = document.createRange();
-              range.setStart(node, index); range.setEnd(node, index + text.length);
-              return range;
+            for (let offset = 0; offset < value.length; offset += 1) {
+              characters.push({ node, offset, value: value[offset] });
             }
           }
+
+          let normalized = '';
+          const positions = [];
+          let previousWasWhitespace = false;
+          characters.forEach(character => {
+            if (/\s/.test(character.value)) {
+              if (!normalized || previousWasWhitespace) return;
+              normalized += ' ';
+              positions.push({
+                start: character,
+                end: { node: character.node, offset: character.offset + 1 }
+              });
+              previousWasWhitespace = true;
+              return;
+            }
+
+            normalized += character.value.toLowerCase();
+            positions.push({
+              start: character,
+              end: { node: character.node, offset: character.offset + 1 }
+            });
+            previousWasWhitespace = false;
+          });
+
+          const index = normalized.indexOf(target);
+          if (index < 0) return;
+          const first = positions[index];
+          const last = positions[index + target.length - 1];
+          if (!first || !last) return;
+          const range = document.createRange();
+          range.setStart(first.start.node, first.start.offset);
+          range.setEnd(last.end.node, last.end.offset);
+          return range;
         }
 
         function addMarker(block, item, lineRect) {
@@ -200,6 +237,64 @@ private enum HTMLPage {
           block.appendChild(marker);
         }
 
+        function outlinePath(rectangles) {
+          const paddingX = 3;
+          const paddingY = 2;
+          const valid = rectangles
+            .filter(rect => rect.width > 0 && rect.height > 0)
+            .sort((left, right) => left.top - right.top || left.left - right.left);
+          if (!valid.length) return '';
+
+          const lines = [];
+          valid.forEach(rect => {
+            const line = lines[lines.length - 1];
+            const sameLine = line && rect.top <= line.bottom + 1 && rect.bottom >= line.top - 1;
+            if (sameLine) {
+              line.left = Math.min(line.left, rect.left);
+              line.top = Math.min(line.top, rect.top);
+              line.right = Math.max(line.right, rect.right);
+              line.bottom = Math.max(line.bottom, rect.bottom);
+            } else {
+              lines.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+            }
+          });
+
+          const padded = lines.map(line => ({
+            left: line.left - paddingX,
+            top: line.top - paddingY,
+            right: line.right + paddingX,
+            bottom: line.bottom + paddingY
+          }));
+          let path = 'M ' + padded[0].left + ' ' + padded[0].top + ' H ' + padded[0].right + ' V ' + padded[0].bottom;
+          for (let index = 1; index < padded.length; index += 1) {
+            path += ' H ' + padded[index].right + ' V ' + padded[index].bottom;
+          }
+          const last = padded[padded.length - 1];
+          path += ' H ' + last.left + ' V ' + last.top;
+          for (let index = padded.length - 2; index >= 0; index -= 1) {
+            path += ' H ' + padded[index].left + ' V ' + padded[index].top;
+          }
+          return path + ' Z';
+        }
+
+        function redrawOutlines() {
+          const layer = document.getElementById('review-outline-layer');
+          if (!layer) return;
+          layer.setAttribute('viewBox', '0 0 ' + window.innerWidth + ' ' + window.innerHeight);
+          layer.setAttribute('width', window.innerWidth);
+          layer.setAttribute('height', window.innerHeight);
+          layer.setAttribute('preserveAspectRatio', 'none');
+          layer.replaceChildren();
+          document.querySelectorAll('.review-highlight[data-annotation-id]').forEach(mark => {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.classList.add('review-outline');
+            path.dataset.annotationId = mark.dataset.annotationId;
+            path.setAttribute('d', outlinePath(Array.from(mark.getClientRects())));
+            layer.appendChild(path);
+          });
+          window.setSelectedAnnotation(window.selectedReviewAnnotationID || null);
+        }
+
         function highlight(item) {
           const range = findTextRange(item.selectedText);
           if (!range) return;
@@ -217,6 +312,10 @@ private enum HTMLPage {
         window.setAnnotations = (annotations, selectedID) => {
           clearHighlights();
           (annotations || []).forEach(item => highlight(item));
+          const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          layer.id = 'review-outline-layer';
+          document.body.appendChild(layer);
+          redrawOutlines();
           window.setSelectedAnnotation(selectedID || null);
           notifyVisibleAnnotation();
         };
@@ -260,9 +359,11 @@ private enum HTMLPage {
         }
 
         window.addEventListener('scroll', () => {
+          redrawOutlines();
           window.clearTimeout(visibleAnnotationTimer);
           visibleAnnotationTimer = window.setTimeout(notifyVisibleAnnotation, 45);
         }, { passive: true });
+        window.addEventListener('resize', redrawOutlines);
       </script>
     </body>
     </html>
