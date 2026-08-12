@@ -12,15 +12,13 @@ struct PreviewWebView: NSViewRepresentable {
     let annotations: [ReviewAnnotation]
     let onRegion: (SelectedRegion) -> Void
     let onFocusAnnotation: (UUID) -> Void
-    let onVisibleAnnotation: (UUID) -> Void
     let selectedAnnotationID: UUID?
     let focusRequest: PreviewFocusRequest?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onRegion: onRegion,
-            onFocusAnnotation: onFocusAnnotation,
-            onVisibleAnnotation: onVisibleAnnotation
+            onFocusAnnotation: onFocusAnnotation
         )
     }
 
@@ -38,7 +36,6 @@ struct PreviewWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onRegion = onRegion
         context.coordinator.onFocusAnnotation = onFocusAnnotation
-        context.coordinator.onVisibleAnnotation = onVisibleAnnotation
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             webView.loadHTMLString(html, baseURL: nil)
@@ -57,7 +54,6 @@ struct PreviewWebView: NSViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var onRegion: (SelectedRegion) -> Void
         var onFocusAnnotation: (UUID) -> Void
-        var onVisibleAnnotation: (UUID) -> Void
         weak var webView: WKWebView?
         var lastHTML = ""
         var pendingAnnotations: [ReviewAnnotation] = []
@@ -68,22 +64,16 @@ struct PreviewWebView: NSViewRepresentable {
 
         init(
             onRegion: @escaping (SelectedRegion) -> Void,
-            onFocusAnnotation: @escaping (UUID) -> Void,
-            onVisibleAnnotation: @escaping (UUID) -> Void
+            onFocusAnnotation: @escaping (UUID) -> Void
         ) {
             self.onRegion = onRegion
             self.onFocusAnnotation = onFocusAnnotation
-            self.onVisibleAnnotation = onVisibleAnnotation
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
             if type == "focusAnnotation", let value = body["id"] as? String, let id = UUID(uuidString: value) {
                 DispatchQueue.main.async { self.onFocusAnnotation(id) }
-                return
-            }
-            if type == "visibleAnnotation", let value = body["id"] as? String, let id = UUID(uuidString: value) {
-                DispatchQueue.main.async { self.onVisibleAnnotation(id) }
                 return
             }
             guard type == "region" else { return }

@@ -141,7 +141,6 @@ struct ContentView: View {
                         annotations: previewAnnotations,
                         onRegion: handleRegion,
                         onFocusAnnotation: selectAnnotationFromPreview,
-                        onVisibleAnnotation: handlePreviewVisibility,
                         selectedAnnotationID: selectedAnnotationID,
                         focusRequest: previewFocusRequest
                     )
@@ -592,12 +591,6 @@ struct ContentView: View {
         if let selectedAnnotationID {
             sidebarScrollRequest = SidebarScrollRequest(id: selectedAnnotationID, anchor: .center)
         }
-    }
-
-    private func handlePreviewVisibility(_ id: UUID) {
-        guard pendingBottomScrollID == nil else { return }
-        guard previewAnnotations.contains(where: { $0.id == id }) else { return }
-        selectedAnnotationID = id
     }
 
     private func focusDraft() {

@@ -317,7 +317,6 @@ private enum HTMLPage {
           document.body.appendChild(layer);
           redrawOutlines();
           window.setSelectedAnnotation(selectedID || null);
-          notifyVisibleAnnotation();
         };
         window.selectedReviewAnnotationID = null;
         window.setSelectedAnnotation = id => {
@@ -335,33 +334,8 @@ private enum HTMLPage {
           window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: 'smooth' });
         };
 
-        let visibleAnnotationTimer = null;
-        let lastVisibleAnnotationID = null;
-        function notifyVisibleAnnotation() {
-          const markers = Array.from(document.querySelectorAll('.review-marker[data-annotation-id]'));
-          if (!markers.length) return;
-          const targetY = window.innerHeight * 0.25;
-          let nearest = null;
-          let nearestDistance = Number.POSITIVE_INFINITY;
-          markers.forEach(marker => {
-            const block = marker.closest('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,td,th') || marker;
-            const rect = block.getBoundingClientRect();
-            if (rect.bottom < 0 || rect.top > window.innerHeight) return;
-            const distance = Math.abs(rect.top - targetY);
-            if (distance < nearestDistance) {
-              nearest = marker.dataset.annotationId;
-              nearestDistance = distance;
-            }
-          });
-          if (!nearest || nearest === lastVisibleAnnotationID) return;
-          lastVisibleAnnotationID = nearest;
-          review()?.postMessage({ type: 'visibleAnnotation', id: nearest });
-        }
-
         window.addEventListener('scroll', () => {
           redrawOutlines();
-          window.clearTimeout(visibleAnnotationTimer);
-          visibleAnnotationTimer = window.setTimeout(notifyVisibleAnnotation, 45);
         }, { passive: true });
         window.addEventListener('resize', redrawOutlines);
       </script>
