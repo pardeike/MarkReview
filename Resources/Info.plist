@@ -6,6 +6,8 @@
   <key>CFBundleDisplayName</key><string>MarkReview</string>
   <key>CFBundleExecutable</key><string>MarkReview</string>
   <key>CFBundleIdentifier</key><string>com.markreview.app</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>MarkReview</string>
   <key>CFBundlePackageType</key><string>APPL</string>
