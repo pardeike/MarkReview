@@ -2,11 +2,14 @@ import Foundation
 import Markdown
 
 struct MarkdownRenderer {
-    func render(_ markdown: String) -> String {
+    static func makeContentNonce() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "")
+    }
+
+    func render(_ markdown: String, contentNonce: String = Self.makeContentNonce()) -> String {
         let document = Document(parsing: markdown)
         let body = HTMLFormatter.format(document)
         let accent = SystemAccentPalette.current
-        let contentNonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         return HTMLPage.template
             .replacingOccurrences(of: "__MARKREVIEW_CONTENT_NONCE__", with: contentNonce)
             .replacingOccurrences(of: "__REVIEW_ACCENT_MUTED__", with: accent.cssRGBA(alpha: 0.45))
@@ -46,10 +49,11 @@ private enum HTMLPage {
         ul, ol { padding-left: 1.6em; } li { margin: .25em 0; }
         blockquote { border-left: 4px solid #c9cdd2; padding-left: 1em; color: #5f6368; }
         code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; color: #1f2937; background: #eef2f7; padding: .12em .3em; border-radius: 4px; }
-        pre { padding: 14px 16px; overflow: visible; border-radius: 8px; background: #eef2f7; color: #1f2937; }
-        pre > code { display: block; max-width: 100%; overflow-x: auto; }
+        pre { max-width: 100%; padding: 14px 16px; overflow-x: auto; border-radius: 8px; background: #eef2f7; color: #1f2937; }
+        pre > code { display: block; width: max-content; min-width: 100%; }
         pre code { background: transparent; color: #1f2937; padding: 0; }
-        table { border-collapse: collapse; width: 100%; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
+        table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
+        a, :not(pre) > code { overflow-wrap: anywhere; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         .review-annotated-block { position: relative; }
         #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }

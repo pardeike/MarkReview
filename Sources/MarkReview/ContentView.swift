@@ -138,6 +138,9 @@ private struct ReviewTextEditor: NSViewRepresentable {
 }
 
 struct ContentView: View {
+    static let minimumPreviewOnlyWidth: CGFloat = 520
+    static let minimumReviewWidth: CGFloat = 800
+
     private static let minimumPreviewFontScale = 0.75
     private static let maximumPreviewFontScale = 2.0
     private static let previewFontScaleStep = 0.1
@@ -160,6 +163,7 @@ struct ContentView: View {
     @State private var previewFocusRequest: PreviewFocusRequest?
     @State private var isSidebarVisible: Bool
     @State private var previewFontScale = ContentView.defaultPreviewFontScale
+    @State private var previewContentNonce: String
 
     private let renderer = MarkdownRenderer()
 
@@ -174,6 +178,7 @@ struct ContentView: View {
         let hasMarkdown = !document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldShowForDocumentType = !Self.isMarkdownOnly(fileURL) || !document.annotations.isEmpty
         _isSidebarVisible = State(initialValue: hasMarkdown && shouldShowForDocumentType)
+        _previewContentNonce = State(initialValue: MarkdownRenderer.makeContentNonce())
     }
 
     private static func isMarkdownOnly(_ fileURL: URL?) -> Bool {
@@ -182,20 +187,37 @@ struct ContentView: View {
 
     var body: some View {
         let _ = documentRevision
+        let windowActions = MarkReviewActions(
+            saveDocument: saveDocument,
+            closeWindow: closeWindow,
+            renumberAnnotations: renumberAnnotations,
+            toggleSidebar: toggleSidebar,
+            isSidebarVisible: isSidebarVisible,
+            zoomInPreview: zoomInPreview,
+            zoomOutPreview: zoomOutPreview,
+            resetPreviewZoom: resetPreviewZoom,
+            canZoomInPreview: canZoomInPreview,
+            canZoomOutPreview: canZoomOutPreview,
+            isPreviewAtActualSize: isPreviewAtActualSize
+        )
         Group {
             if document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 emptyState
             } else {
                 HStack(spacing: 0) {
                     PreviewWebView(
-                        html: renderer.render(document.originalMarkdown),
+                        html: renderer.render(
+                            document.originalMarkdown,
+                            contentNonce: previewContentNonce
+                        ),
                         fontScale: previewFontScale,
                         annotations: previewAnnotations,
                         onRegion: handleRegion,
                         onFocusAnnotation: selectAnnotationFromPreview,
                         selectedAnnotationID: selectedAnnotationID,
                         focusRequest: previewFocusRequest,
-                        onZoomScroll: adjustPreviewFontScale
+                        onZoom: adjustPreviewFontScale,
+                        onResetZoom: resetPreviewZoom
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -218,25 +240,17 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 980, minHeight: 680)
+        .frame(
+            minWidth: isSidebarVisible ? Self.minimumReviewWidth : Self.minimumPreviewOnlyWidth,
+            minHeight: 680
+        )
         .tint(Color(nsColor: NSColor.controlAccentColor))
         .navigationTitle(document.title)
-        .focusedSceneValue(\.markReviewActions, MarkReviewActions(
-            saveDocument: saveDocument,
-            closeWindow: closeWindow,
-            renumberAnnotations: renumberAnnotations,
-            toggleSidebar: toggleSidebar,
-            isSidebarVisible: isSidebarVisible,
-            zoomInPreview: zoomInPreview,
-            zoomOutPreview: zoomOutPreview,
-            resetPreviewZoom: resetPreviewZoom,
-            canZoomInPreview: canZoomInPreview,
-            canZoomOutPreview: canZoomOutPreview,
-            isPreviewAtActualSize: isPreviewAtActualSize
-        ))
+        .focusedSceneValue(\.markReviewActions, windowActions)
         .background(WindowFrameObserver(
             identifier: document.id.uuidString,
-            prepareForSave: prepareDraftForSave
+            prepareForSave: prepareDraftForSave,
+            actions: windowActions
         ))
         .onChange(of: focusedComment) { _, focus in
             switch focus {

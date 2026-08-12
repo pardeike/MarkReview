@@ -29,56 +29,60 @@ extension FocusedValues {
 struct MarkReviewCommands: Commands {
     @FocusedValue(\.markReviewActions) private var actions
 
+    private var target: MarkReviewActions? {
+        MarkReviewWindowActions.resolve(actions)
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {
             Button("Close Window") {
-                actions?.closeWindow()
+                MarkReviewWindowActions.resolve(actions)?.closeWindow()
             }
             .keyboardShortcut("w", modifiers: [.command])
-            .disabled(actions == nil)
+            .disabled(target == nil)
 
             Divider()
 
             Button("Save") {
-                actions?.saveDocument()
+                MarkReviewWindowActions.resolve(actions)?.saveDocument()
             }
             .keyboardShortcut("s", modifiers: [.command])
-            .disabled(actions == nil)
+            .disabled(target == nil)
         }
 
         CommandMenu("Review") {
             Button("Renumber Comments") {
-                actions?.renumberAnnotations()
+                MarkReviewWindowActions.resolve(actions)?.renumberAnnotations()
             }
-            .disabled(actions == nil)
+            .disabled(target == nil)
         }
 
         CommandGroup(replacing: .sidebar) {
-            Button(actions?.isSidebarVisible == true ? "Hide Sidebar" : "Show Sidebar") {
-                actions?.toggleSidebar()
+            Button(target?.isSidebarVisible == true ? "Hide Sidebar" : "Show Sidebar") {
+                MarkReviewWindowActions.resolve(actions)?.toggleSidebar()
             }
             .keyboardShortcut("1", modifiers: [.command, .option])
-            .disabled(actions == nil)
+            .disabled(target == nil)
         }
 
         CommandGroup(after: .sidebar) {
             Button("Actual Size") {
-                actions?.resetPreviewZoom()
+                MarkReviewWindowActions.resolve(actions)?.resetPreviewZoom()
             }
             .keyboardShortcut("0", modifiers: [.command])
-            .disabled(actions == nil || actions?.isPreviewAtActualSize == true)
+            .disabled(target == nil || target?.isPreviewAtActualSize == true)
 
             Button("Zoom In") {
-                actions?.zoomInPreview()
+                MarkReviewWindowActions.resolve(actions)?.zoomInPreview()
             }
             .keyboardShortcut("+", modifiers: [.command])
-            .disabled(actions == nil || actions?.canZoomInPreview == false)
+            .disabled(target == nil || target?.canZoomInPreview == false)
 
             Button("Zoom Out") {
-                actions?.zoomOutPreview()
+                MarkReviewWindowActions.resolve(actions)?.zoomOutPreview()
             }
             .keyboardShortcut("-", modifiers: [.command])
-            .disabled(actions == nil || actions?.canZoomOutPreview == false)
+            .disabled(target == nil || target?.canZoomOutPreview == false)
         }
     }
 }

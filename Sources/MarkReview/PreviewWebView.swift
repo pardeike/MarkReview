@@ -8,6 +8,39 @@ struct PreviewFocusRequest: Equatable {
     let token: Int
 }
 
+enum PreviewZoomCommand: Equatable {
+    case adjust(CGFloat)
+    case reset
+}
+
+enum PreviewZoomInput {
+    static func keyCommand(
+        charactersIgnoringModifiers: String?,
+        modifiers: NSEvent.ModifierFlags
+    ) -> PreviewZoomCommand? {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option) else { return nil }
+
+        switch charactersIgnoringModifiers {
+        case "+", "=":
+            return .adjust(1)
+        case "-":
+            return .adjust(-1)
+        case "0":
+            return .reset
+        default:
+            return nil
+        }
+    }
+
+    static func usesScrollZoom(modifiers: NSEvent.ModifierFlags) -> Bool {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        return flags.contains(.option) || flags.contains(.command)
+    }
+}
+
 enum PreviewNavigationPolicy {
     static func opensExternally(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
@@ -21,23 +54,57 @@ enum PreviewNavigationPolicy {
 }
 
 private final class ZoomableWebView: WKWebView {
-    var onAltScroll: ((CGFloat) -> Void)?
+    var onZoom: ((CGFloat) -> Void)?
+    var onResetZoom: (() -> Void)?
     private var preciseScrollRemainder: CGFloat = 0
+    private var magnificationRemainder: CGFloat = 0
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        switch PreviewZoomInput.keyCommand(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifiers: event.modifierFlags
+        ) {
+        case .adjust(let steps):
+            onZoom?(steps)
+            return true
+        case .reset:
+            onResetZoom?()
+            return true
+        case nil:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
 
     override func scrollWheel(with event: NSEvent) {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.contains(.option) else {
+        guard PreviewZoomInput.usesScrollZoom(modifiers: event.modifierFlags) else {
             preciseScrollRemainder = 0
             super.scrollWheel(with: event)
             return
         }
 
-        let threshold: CGFloat = event.hasPreciseScrollingDeltas ? 24 : 1
+        if !event.hasPreciseScrollingDeltas {
+            preciseScrollRemainder = 0
+            guard event.scrollingDeltaY != 0 else { return }
+            let steps: CGFloat = event.scrollingDeltaY > 0 ? 1 : -1
+            onZoom?(steps)
+            return
+        }
+
+        let threshold: CGFloat = 24
         preciseScrollRemainder += event.scrollingDeltaY
-        let steps = Int(preciseScrollRemainder / threshold)
+        let quantizedSteps = Int(preciseScrollRemainder / threshold)
+        guard quantizedSteps != 0 else { return }
+        preciseScrollRemainder -= CGFloat(quantizedSteps) * threshold
+        onZoom?(quantizedSteps > 0 ? 1 : -1)
+    }
+
+    override func magnify(with event: NSEvent) {
+        magnificationRemainder += event.magnification
+        let threshold: CGFloat = 0.08
+        let steps = Int(magnificationRemainder / threshold)
         guard steps != 0 else { return }
-        preciseScrollRemainder -= CGFloat(steps) * threshold
-        onAltScroll?(CGFloat(steps))
+        magnificationRemainder -= CGFloat(steps) * threshold
+        onZoom?(CGFloat(steps))
     }
 }
 
@@ -49,13 +116,15 @@ struct PreviewWebView: NSViewRepresentable {
     let onFocusAnnotation: (UUID) -> Void
     let selectedAnnotationID: UUID?
     let focusRequest: PreviewFocusRequest?
-    let onZoomScroll: (CGFloat) -> Void
+    let onZoom: (CGFloat) -> Void
+    let onResetZoom: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onRegion: onRegion,
             onFocusAnnotation: onFocusAnnotation,
-            onZoomScroll: onZoomScroll
+            onZoom: onZoom,
+            onResetZoom: onResetZoom
         )
     }
 
@@ -67,8 +136,11 @@ struct PreviewWebView: NSViewRepresentable {
         let webView = ZoomableWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
-        webView.onAltScroll = { steps in
-            context.coordinator.onZoomScroll(steps)
+        webView.onZoom = { steps in
+            context.coordinator.onZoom(steps)
+        }
+        webView.onResetZoom = {
+            context.coordinator.onResetZoom()
         }
         context.coordinator.webView = webView
         webView.loadHTMLString(html, baseURL: nil)
@@ -78,7 +150,8 @@ struct PreviewWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onRegion = onRegion
         context.coordinator.onFocusAnnotation = onFocusAnnotation
-        context.coordinator.onZoomScroll = onZoomScroll
+        context.coordinator.onZoom = onZoom
+        context.coordinator.onResetZoom = onResetZoom
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             context.coordinator.isReady = false
@@ -101,7 +174,8 @@ struct PreviewWebView: NSViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var onRegion: (SelectedRegion) -> Void
         var onFocusAnnotation: (UUID) -> Void
-        var onZoomScroll: (CGFloat) -> Void
+        var onZoom: (CGFloat) -> Void
+        var onResetZoom: () -> Void
         weak var webView: WKWebView?
         var lastHTML = ""
         var pendingFontScale: CGFloat = 1
@@ -115,11 +189,13 @@ struct PreviewWebView: NSViewRepresentable {
         init(
             onRegion: @escaping (SelectedRegion) -> Void,
             onFocusAnnotation: @escaping (UUID) -> Void,
-            onZoomScroll: @escaping (CGFloat) -> Void
+            onZoom: @escaping (CGFloat) -> Void,
+            onResetZoom: @escaping () -> Void
         ) {
             self.onRegion = onRegion
             self.onFocusAnnotation = onFocusAnnotation
-            self.onZoomScroll = onZoomScroll
+            self.onZoom = onZoom
+            self.onResetZoom = onResetZoom
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -145,6 +221,7 @@ struct PreviewWebView: NSViewRepresentable {
             isReady = true
             applyAnnotationsWhenReady()
             focusRequestedAnnotationWhenReady()
+            applyFontScaleWhenReady()
         }
 
         func webView(

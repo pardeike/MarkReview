@@ -156,32 +156,88 @@ final class ReviewWindowCloseGuard: NSObject, NSWindowDelegate {
 
 private var reviewWindowCloseGuardKey: UInt8 = 0
 private var documentSaveDelegateKey: UInt8 = 0
+private var reviewWindowActionsKey: UInt8 = 0
+
+@MainActor
+private final class MarkReviewWindowActionBox: NSObject {
+    var actions: MarkReviewActions
+
+    init(actions: MarkReviewActions) {
+        self.actions = actions
+    }
+}
+
+@MainActor
+enum MarkReviewWindowActions {
+    static func resolve(_ focusedActions: MarkReviewActions?) -> MarkReviewActions? {
+        if let focusedActions {
+            return focusedActions
+        }
+
+        let windows = [NSApp.keyWindow, NSApp.mainWindow] + NSApp.orderedWindows.map(Optional.some)
+        for window in windows {
+            if let actions = actions(for: window) {
+                return actions
+            }
+        }
+        return nil
+    }
+
+    static func actions(for window: NSWindow?) -> MarkReviewActions? {
+        guard let window else { return nil }
+        return (objc_getAssociatedObject(window, &reviewWindowActionsKey) as? MarkReviewWindowActionBox)?.actions
+    }
+
+    static func install(_ actions: MarkReviewActions, on window: NSWindow) {
+        if let box = objc_getAssociatedObject(window, &reviewWindowActionsKey) as? MarkReviewWindowActionBox {
+            box.actions = actions
+        } else {
+            objc_setAssociatedObject(
+                window,
+                &reviewWindowActionsKey,
+                MarkReviewWindowActionBox(actions: actions),
+                .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            )
+        }
+    }
+}
 
 struct WindowFrameObserver: NSViewRepresentable {
     let identifier: String
     let prepareForSave: () -> Void
+    let actions: MarkReviewActions
 
-    init(identifier: String, prepareForSave: @escaping () -> Void = {}) {
+    init(
+        identifier: String,
+        prepareForSave: @escaping () -> Void = {},
+        actions: MarkReviewActions
+    ) {
         self.identifier = identifier
         self.prepareForSave = prepareForSave
+        self.actions = actions
     }
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         DispatchQueue.main.async {
-            configureWindow(for: view, prepareForSave: prepareForSave)
+            configureWindow(for: view, prepareForSave: prepareForSave, actions: actions)
         }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
-            configureWindow(for: view, prepareForSave: prepareForSave)
+            configureWindow(for: view, prepareForSave: prepareForSave, actions: actions)
         }
     }
 
-    private func configureWindow(for view: NSView, prepareForSave: @escaping () -> Void) {
+    private func configureWindow(
+        for view: NSView,
+        prepareForSave: @escaping () -> Void,
+        actions: MarkReviewActions
+    ) {
         guard let window = view.window else { return }
+        MarkReviewWindowActions.install(actions, on: window)
         if let documentID = UUID(uuidString: identifier) {
             let existingGuard = objc_getAssociatedObject(window, &reviewWindowCloseGuardKey) as? ReviewWindowCloseGuard
             if existingGuard?.documentID != documentID {

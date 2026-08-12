@@ -48,8 +48,8 @@ not create a second export format.
 
 - Linked highlights and comment cards make even short selections easy to find.
 - Review numbers can be reset to top-to-bottom document order at any time.
-- Reading size can be changed from the View menu or by Option-scrolling over
-  the document.
+- Reading size can be changed from the View menu, with Command-plus/minus/zero,
+  by Option- or Command-scrolling, or with a trackpad pinch.
 - Markdown and MarkReview files have different Finder icons.
 - MarkReview follows the macOS accent color and supports light and dark mode.
 

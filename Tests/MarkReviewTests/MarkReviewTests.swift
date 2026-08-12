@@ -270,11 +270,53 @@ func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
 
 @Test("preview supports runtime font scaling without replacing the document")
 func previewSupportsRuntimeFontScaling() {
-    let rendered = MarkdownRenderer().render("# Review")
+    let nonce = "stable-preview-window"
+    let renderer = MarkdownRenderer()
+    let rendered = renderer.render("# Review", contentNonce: nonce)
 
     #expect(rendered.contains("--markdown-font-scale: 1"))
     #expect(rendered.contains("font-size: calc(16px * var(--markdown-font-scale))"))
     #expect(rendered.contains("window.setMarkdownFontScale = scale"))
+    #expect(rendered == renderer.render("# Review", contentNonce: nonce))
+    #expect(rendered != renderer.render("# Review", contentNonce: "different-preview-window"))
+}
+
+@Test("wide Markdown content scrolls locally instead of widening the document")
+func wideMarkdownContentDoesNotWidenDocument() {
+    let rendered = MarkdownRenderer().render("| Very wide value |\n|---|\n| value |\n\n```text\nvalue\n```")
+
+    #expect(rendered.contains("pre { max-width: 100%;"))
+    #expect(rendered.contains("table { display: block; width: 100%; max-width: 100%; overflow-x: auto;"))
+    #expect(rendered.contains("a, :not(pre) > code { overflow-wrap: anywhere; }"))
+}
+
+@Test("Markdown-only windows can be narrower than review windows")
+func markdownOnlyWindowsHaveAdaptiveMinimumWidth() {
+    #expect(ContentView.minimumPreviewOnlyWidth == 520)
+    #expect(ContentView.minimumPreviewOnlyWidth < ContentView.minimumReviewWidth)
+}
+
+@Test("preview zoom inputs work while WebKit owns keyboard focus")
+func previewZoomInputs() {
+    #expect(PreviewZoomInput.keyCommand(
+        charactersIgnoringModifiers: "-",
+        modifiers: [.command]
+    ) == .adjust(-1))
+    #expect(PreviewZoomInput.keyCommand(
+        charactersIgnoringModifiers: "=",
+        modifiers: [.command, .shift]
+    ) == .adjust(1))
+    #expect(PreviewZoomInput.keyCommand(
+        charactersIgnoringModifiers: "0",
+        modifiers: [.command]
+    ) == .reset)
+    #expect(PreviewZoomInput.keyCommand(
+        charactersIgnoringModifiers: "-",
+        modifiers: []
+    ) == nil)
+    #expect(PreviewZoomInput.usesScrollZoom(modifiers: [.option]))
+    #expect(PreviewZoomInput.usesScrollZoom(modifiers: [.command]))
+    #expect(!PreviewZoomInput.usesScrollZoom(modifiers: []))
 }
 
 @Test("preview stacks same-row review markers for hover inspection")
