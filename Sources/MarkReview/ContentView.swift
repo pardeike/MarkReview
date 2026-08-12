@@ -247,7 +247,7 @@ struct ContentView: View {
                     .font(.body)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 5)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 0)
                     .allowsHitTesting(false)
             }
             TextEditor(text: text)
