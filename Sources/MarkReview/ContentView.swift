@@ -5,19 +5,6 @@ private extension Color {
     static let reviewBlue = Color(red: 0, green: 122.0 / 255.0, blue: 1)
 }
 
-private struct CommentFrame: Equatable {
-    let id: UUID
-    let minY: CGFloat
-}
-
-private struct CommentFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [CommentFrame] = []
-
-    static func reduce(value: inout [CommentFrame], nextValue: () -> [CommentFrame]) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
 private enum SidebarScrollAnchor: Equatable {
     case center
     case bottom
@@ -134,7 +121,6 @@ struct ContentView: View {
     @State private var focusedComment: CommentFocus?
     @State private var nextPreviewFocusToken = 0
     @State private var previewFocusRequest: PreviewFocusRequest?
-    @State private var lastSidebarFollowID: UUID?
 
     private let renderer = MarkdownRenderer()
 
@@ -257,10 +243,6 @@ struct ContentView: View {
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                     }
-                    .coordinateSpace(name: "review-sidebar-scroll")
-                    .onPreferenceChange(CommentFramePreferenceKey.self) { frames in
-                        syncFromSidebarScroll(frames)
-                    }
                     .onChange(of: sidebarScrollRequest) { _, request in
                         guard let request else { return }
                         sidebarScrollRequest = nil
@@ -280,7 +262,6 @@ struct ContentView: View {
                                     scroll()
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                         if pendingBottomScrollID == request.id {
-                                            lastSidebarFollowID = request.id
                                             pendingBottomScrollID = nil
                                         }
                                     }
@@ -319,12 +300,6 @@ struct ContentView: View {
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewBlue.opacity(0.32), lineWidth: 1))
         .contentShape(Rectangle())
         .id("draft-\(id.uuidString)")
-        .background(GeometryReader { geometry in
-            Color.clear.preference(
-                key: CommentFramePreferenceKey.self,
-                value: [CommentFrame(id: id, minY: geometry.frame(in: .named("review-sidebar-scroll")).minY)]
-            )
-        })
         .onTapGesture { selectDraft(id: id) }
     }
 
@@ -370,12 +345,6 @@ struct ContentView: View {
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewBlue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
         .id("annotation-\(value.id.uuidString)")
-        .background(GeometryReader { geometry in
-            Color.clear.preference(
-                key: CommentFramePreferenceKey.self,
-                value: [CommentFrame(id: value.id, minY: geometry.frame(in: .named("review-sidebar-scroll")).minY)]
-            )
-        })
         .onTapGesture { selectAnnotation(value.id) }
     }
 
@@ -587,14 +556,9 @@ struct ContentView: View {
         focusDraft()
     }
 
-    private func requestPreviewFocus(_ id: UUID, selectsAnnotation: Bool = true) {
+    private func requestPreviewFocus(_ id: UUID) {
         nextPreviewFocusToken += 1
-        lastSidebarFollowID = id
-        previewFocusRequest = PreviewFocusRequest(
-            annotationID: id,
-            token: nextPreviewFocusToken,
-            selectsAnnotation: selectsAnnotation
-        )
+        previewFocusRequest = PreviewFocusRequest(annotationID: id, token: nextPreviewFocusToken)
     }
 
     private func scrollDraftToBottom(_ id: UUID) {
@@ -620,16 +584,6 @@ struct ContentView: View {
         guard pendingBottomScrollID == nil else { return }
         guard previewAnnotations.contains(where: { $0.id == id }) else { return }
         selectedAnnotationID = id
-    }
-
-    private func syncFromSidebarScroll(_ frames: [CommentFrame]) {
-        guard pendingBottomScrollID == nil else { return }
-        guard !frames.isEmpty else { return }
-        let target = frames.min { lhs, rhs in
-            abs(lhs.minY - 8) < abs(rhs.minY - 8)
-        }
-        guard let id = target?.id, lastSidebarFollowID != id else { return }
-        requestPreviewFocus(id, selectsAnnotation: false)
     }
 
     private func focusDraft() {
