@@ -41,7 +41,9 @@ final class SessionRestoration {
 
     private var didRestore = false
     private var isTerminating = false
+    private var isSuppressingLaunchWindows = false
     private var windowCloseObserver: NSObjectProtocol?
+    private var launchWindowObservers: [NSObjectProtocol] = []
 
     private init() {
         windowCloseObserver = NotificationCenter.default.addObserver(
@@ -55,17 +57,42 @@ final class SessionRestoration {
                 self.saveCurrentSession()
             }
         }
+
+        for notificationName in [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didBecomeMainNotification
+        ] {
+            launchWindowObservers.append(
+                NotificationCenter.default.addObserver(
+                    forName: notificationName,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    guard let window = notification.object as? NSWindow else { return }
+                    self?.suppressLaunchWindowIfNeeded(window)
+                }
+            )
+        }
     }
 
     deinit {
         if let windowCloseObserver {
             NotificationCenter.default.removeObserver(windowCloseObserver)
         }
+        launchWindowObservers.forEach { observer in
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    func beginLaunchSuppression() {
+        isSuppressingLaunchWindows = true
+        NSApp.windows.forEach(suppressLaunchWindowIfNeeded)
     }
 
     func restoreLastSession() {
         guard !didRestore else { return }
         didRestore = true
+        beginLaunchSuppression()
 
         DispatchQueue.main.async { [weak self] in
             self?.restoreWhenDocumentSceneIsReady(attempt: 0)
@@ -113,6 +140,7 @@ final class SessionRestoration {
 
         let session = load()
         closeUntitledWindows()
+        isSuppressingLaunchWindows = false
         guard let session, !session.windows.isEmpty else { return }
 
         for savedWindow in session.windows {
@@ -134,11 +162,24 @@ final class SessionRestoration {
 
     private func closeUntitledWindows() {
         NSApp.windows
-            .filter { $0.title == "Untitled" }
+            .filter { isLaunchPlaceholder($0) }
             .forEach {
                 $0.orderOut(nil)
                 $0.close()
             }
+    }
+
+    private func suppressLaunchWindowIfNeeded(_ window: NSWindow) {
+        guard isSuppressingLaunchWindows, isLaunchPlaceholder(window) else { return }
+        window.orderOut(nil)
+    }
+
+    private func isLaunchPlaceholder(_ window: NSWindow) -> Bool {
+        if window.title == "Untitled" {
+            return true
+        }
+        guard let document = window.windowController?.document else { return window.title == "Untitled" }
+        return document.fileURL == nil
     }
 
     private var sessionURL: URL? {

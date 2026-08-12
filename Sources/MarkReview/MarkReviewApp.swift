@@ -62,9 +62,13 @@ extension Notification.Name {
 }
 
 final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        SessionRestoration.shared.beginLaunchSuppression()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.activate(ignoringOtherApps: true)
         SessionRestoration.shared.restoreLastSession()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
