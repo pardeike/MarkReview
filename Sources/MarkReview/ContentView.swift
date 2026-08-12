@@ -183,6 +183,7 @@ struct ContentView: View {
             importMarkdown: importMarkdown,
             exportAgentJSON: exportAgentJSON,
             renumberAnnotations: renumberAnnotations,
+            closeWithoutSaving: closeWithoutSaving,
             canExportAgentJSON: !document.originalMarkdown.isEmpty
         ))
         .background(WindowFrameObserver(identifier: document.id.uuidString))
@@ -194,6 +195,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentRenumber)) { _ in
             renumberAnnotations()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markReviewDocumentCloseWithoutSaving)) { _ in
+            closeWithoutSaving()
         }
         .onChange(of: focusedComment) { _, focus in
             switch focus {
@@ -661,5 +665,15 @@ struct ContentView: View {
             try data.write(to: url, options: .atomic)
         } catch {
         }
+    }
+
+    private func closeWithoutSaving() {
+        let document = NSDocumentController.shared.currentDocument
+            ?? NSDocumentController.shared.documents.first { document in
+                document.windowControllers.contains { $0.window?.isKeyWindow == true }
+            }
+        guard let document else { return }
+        document.updateChangeCount(.changeCleared)
+        document.close()
     }
 }

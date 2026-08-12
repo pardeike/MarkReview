@@ -5,6 +5,7 @@ struct MarkReviewActions {
     let importMarkdown: () -> Void
     let exportAgentJSON: () -> Void
     let renumberAnnotations: () -> Void
+    let closeWithoutSaving: () -> Void
     let canExportAgentJSON: Bool
 }
 
@@ -51,6 +52,16 @@ struct MarkReviewCommands: Commands {
                 }
             }
             .keyboardShortcut("r", modifiers: [.command, .option])
+
+            Divider()
+
+            Button("Close Without Saving") {
+                if let actions {
+                    actions.closeWithoutSaving()
+                } else {
+                    NotificationCenter.default.post(name: .markReviewDocumentCloseWithoutSaving, object: nil)
+                }
+            }
         }
     }
 }
@@ -59,6 +70,7 @@ extension Notification.Name {
     static let markReviewDocumentImport = Notification.Name("MarkReviewDocumentImport")
     static let markReviewDocumentExport = Notification.Name("MarkReviewDocumentExport")
     static let markReviewDocumentRenumber = Notification.Name("MarkReviewDocumentRenumber")
+    static let markReviewDocumentCloseWithoutSaving = Notification.Name("MarkReviewDocumentCloseWithoutSaving")
 }
 
 final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
