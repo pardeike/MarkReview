@@ -103,6 +103,21 @@ private enum HTMLPage {
           return { before: content.slice(Math.max(0, index - 120), index), after: content.slice(index + text.length, index + text.length + 120) };
         }
 
+        function contextForSelection(block, selectionRange) {
+          const beforeRange = document.createRange();
+          beforeRange.selectNodeContents(block);
+          beforeRange.setEnd(selectionRange.startContainer, selectionRange.startOffset);
+
+          const afterRange = document.createRange();
+          afterRange.selectNodeContents(block);
+          afterRange.setStart(selectionRange.endContainer, selectionRange.endOffset);
+
+          return {
+            before: beforeRange.toString().slice(-120),
+            after: afterRange.toString().slice(0, 120)
+          };
+        }
+
         function send(region) {
           review()?.postMessage({ type: 'region', ...region });
         }
@@ -123,7 +138,8 @@ private enum HTMLPage {
           }
 
           if (!text || !selection.rangeCount) return;
-          const region = { kind: 'text', selectedText: text, blockText, section, ...contextFor(block, text) };
+          const selectionRange = selection.getRangeAt(0).cloneRange();
+          const region = { kind: 'text', selectedText: text, blockText, section, ...contextForSelection(block, selectionRange) };
           selection.removeAllRanges();
           send(region);
         });
@@ -142,7 +158,11 @@ private enum HTMLPage {
           window.getSelection()?.removeAllRanges();
         }
 
-        function findTextRange(text) {
+        function normalizeForSearch(value) {
+          return (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        }
+
+        function findTextRange(text, item) {
           const target = (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
           if (!target) return;
 
@@ -180,14 +200,40 @@ private enum HTMLPage {
             previousWasWhitespace = false;
           });
 
-          const index = normalized.indexOf(target);
-          if (index < 0) return;
-          const first = positions[index];
-          const last = positions[index + target.length - 1];
-          if (!first || !last) return;
+          const candidates = [];
+          let index = normalized.indexOf(target);
+          while (index >= 0) {
+            const first = positions[index];
+            const last = positions[index + target.length - 1];
+            if (first && last) {
+              const candidateBlock = blockFor(first.start.node.parentElement);
+              const candidateBefore = normalized.slice(
+                Math.max(0, index - normalizeForSearch(item?.contextBefore).length),
+                index
+              );
+              const candidateAfter = normalized.slice(
+                index + target.length,
+                index + target.length + normalizeForSearch(item?.contextAfter).length
+              );
+              const expectedBefore = normalizeForSearch(item?.contextBefore);
+              const expectedAfter = normalizeForSearch(item?.contextAfter);
+              const expectedBlock = normalizeForSearch(item?.blockText);
+              const actualBlock = normalizeForSearch(readableText(candidateBlock));
+              let score = 0;
+              if (expectedBlock && actualBlock === expectedBlock) score += 100;
+              if (expectedBefore && candidateBefore.endsWith(expectedBefore)) score += 50;
+              if (expectedAfter && candidateAfter.startsWith(expectedAfter)) score += 50;
+              candidates.push({ index, first, last, score });
+            }
+            index = normalized.indexOf(target, index + Math.max(target.length, 1));
+          }
+
+          candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+          const candidate = candidates[0];
+          if (!candidate) return;
           const range = document.createRange();
-          range.setStart(first.start.node, first.start.offset);
-          range.setEnd(last.end.node, last.end.offset);
+          range.setStart(candidate.first.start.node, candidate.first.start.offset);
+          range.setEnd(candidate.last.end.node, candidate.last.end.offset);
           return range;
         }
 
@@ -293,7 +339,7 @@ private enum HTMLPage {
         }
 
         function highlight(item) {
-          const range = findTextRange(item.selectedText);
+          const range = findTextRange(item.selectedText, item);
           if (!range) return;
           const block = blockFor(range.startContainer.parentElement);
           const firstLine = range.getClientRects()[0] || range.getBoundingClientRect();

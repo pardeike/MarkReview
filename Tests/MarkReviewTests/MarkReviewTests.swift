@@ -220,6 +220,16 @@ func previewKeepsNativeOrderedListMarkersOutsideReviewMarkers() {
     #expect(rendered.contains("block.classList.add('review-annotated-block')") == false)
 }
 
+@Test("preview captures and restores the selected occurrence using context")
+func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
+    let rendered = MarkdownRenderer().render("One letter: a. Another letter: a.")
+
+    #expect(rendered.contains("contextForSelection(block, selectionRange)"))
+    #expect(rendered.contains("function findTextRange(text, item)"))
+    #expect(rendered.contains("expectedBefore && candidateBefore.endsWith(expectedBefore)"))
+    #expect(rendered.contains("expectedAfter && candidateAfter.startsWith(expectedAfter)"))
+}
+
 @Test("preview review colors come from the macOS accent color")
 func previewUsesSystemAccentColor() {
     let rendered = MarkdownRenderer().render("# Review")
