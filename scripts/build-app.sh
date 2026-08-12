@@ -25,6 +25,11 @@ xcrun actool \
   --output-partial-info-plist "$icon_info_path" \
   "$repo_root/Resources/Assets.xcassets" >/dev/null
 
+if [[ ! -f "$app_path/Contents/Resources/AppIcon.icns" ]]; then
+  print -u2 -- "Asset catalog did not produce AppIcon.icns; refusing to install an app without an icon."
+  exit 1
+fi
+
 codesign --force --deep --sign - --timestamp=none "$app_path"
 codesign --verify --deep --strict "$app_path"
 
