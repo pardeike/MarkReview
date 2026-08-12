@@ -22,8 +22,12 @@ Requirements: macOS 14 or later, Xcode 27 or a compatible Swift toolchain.
 
 ```sh
 ./scripts/build-app.sh
-open MarkReview.app
+open /Applications/MarkReview.app
 ```
+
+The script builds a release configuration, assembles the app outside the
+repository, signs it with a local ad-hoc signature, and installs it at
+`/Applications/MarkReview.app`.
 
 You can also run the executable during development:
 
