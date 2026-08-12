@@ -40,8 +40,28 @@ final class SessionRestoration {
     static let shared = SessionRestoration()
 
     private var didRestore = false
+    private var isTerminating = false
+    private var windowCloseObserver: NSObjectProtocol?
 
-    private init() {}
+    private init() {
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                guard !self.isTerminating else { return }
+                self.saveCurrentSession()
+            }
+        }
+    }
+
+    deinit {
+        if let windowCloseObserver {
+            NotificationCenter.default.removeObserver(windowCloseObserver)
+        }
+    }
 
     func restoreLastSession() {
         guard !didRestore else { return }
@@ -63,8 +83,12 @@ final class SessionRestoration {
 
         var uniqueWindows: [String: SavedReviewWindow] = [:]
         windows.forEach { uniqueWindows[$0.path] = $0 }
-        guard !uniqueWindows.isEmpty else { return }
         save(MarkReviewSession(windows: uniqueWindows.values.sorted { $0.path < $1.path }))
+    }
+
+    func prepareForTermination() {
+        isTerminating = true
+        saveCurrentSession()
     }
 
     private func open(url: URL, frame: NSRect) {

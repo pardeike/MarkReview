@@ -68,7 +68,7 @@ final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        SessionRestoration.shared.saveCurrentSession()
+        SessionRestoration.shared.prepareForTermination()
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

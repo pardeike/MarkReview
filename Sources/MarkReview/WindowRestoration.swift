@@ -27,7 +27,11 @@ struct WindowFrameObserver: NSViewRepresentable {
         guard window.frameAutosaveName != autosaveName else { return }
 
         window.setFrameAutosaveName(autosaveName)
-        window.isRestorable = true
+        // SessionRestoration owns document reopening and frame restoration.
+        // Disable AppKit's independent window restoration so a manually closed
+        // document cannot come back through a second restoration path.
+        window.isRestorable = false
+        window.restorationClass = nil
         _ = window.setFrameUsingName(autosaveName)
     }
 }
