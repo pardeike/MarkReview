@@ -206,9 +206,18 @@ func sourceLineHintsIgnoreMarkdownSyntax() {
 func previewPositionsMarkersFromDocumentRail() {
     let rendered = MarkdownRenderer().render("1. First item")
 
-    #expect(rendered.contains("positionMarker(marker, blockRect)"))
-    #expect(rendered.contains("documentRect.left - blockRect.left - 38"))
+    #expect(rendered.contains("id = 'review-marker-layer'"))
+    #expect(rendered.contains("documentRect.left - 38"))
+    #expect(rendered.contains("markerLayer.appendChild(marker)"))
     #expect(rendered.contains("positionMarkers()"))
+}
+
+@Test("preview keeps native ordered-list markers outside review markers")
+func previewKeepsNativeOrderedListMarkersOutsideReviewMarkers() {
+    let rendered = MarkdownRenderer().render("1. **First item**\n2. Second item")
+
+    #expect(rendered.contains("#review-marker-layer"))
+    #expect(rendered.contains("block.classList.add('review-annotated-block')") == false)
 }
 
 @Test("preview review colors come from the macOS accent color")
