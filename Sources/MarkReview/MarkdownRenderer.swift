@@ -81,7 +81,6 @@ private enum HTMLPage {
         table { border-collapse: collapse; width: 100%; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         .review-annotated-block { position: relative; }
-        .review-highlight { color: inherit; background: transparent; border: 0; padding: 0; }
         #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }
         .review-outline { fill: none; stroke: rgba(147, 197, 253, .95); stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
         .review-outline.review-selected { stroke: #60a5fa; }
@@ -97,6 +96,7 @@ private enum HTMLPage {
       <script>
         const review = () => window.webkit?.messageHandlers?.review;
         const root = document.getElementById('document');
+        const reviewRanges = new Map();
 
         function sectionFor(element) {
           const headings = [];
@@ -148,15 +148,19 @@ private enum HTMLPage {
           const section = sectionFor(block);
 
           if (event.altKey && blockText) {
+            selection.removeAllRanges();
             send({ kind: 'block', selectedText: blockText, blockText, section, ...contextFor(block, blockText) });
             return;
           }
 
           if (!text || !selection.rangeCount) return;
-          send({ kind: 'text', selectedText: text, blockText, section, ...contextFor(block, text) });
+          const region = { kind: 'text', selectedText: text, blockText, section, ...contextFor(block, text) };
+          selection.removeAllRanges();
+          send(region);
         });
 
         function clearHighlights() {
+          reviewRanges.clear();
           document.querySelectorAll('.review-highlight').forEach(mark => {
             const parent = mark.parentNode;
             while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
@@ -165,6 +169,7 @@ private enum HTMLPage {
           document.querySelectorAll('.review-marker').forEach(marker => marker.remove());
           document.querySelectorAll('.review-annotated-block').forEach(block => block.classList.remove('review-annotated-block'));
           document.getElementById('review-outline-layer')?.remove();
+          window.getSelection()?.removeAllRanges();
         }
 
         function findTextRange(text) {
@@ -285,11 +290,11 @@ private enum HTMLPage {
           layer.setAttribute('height', window.innerHeight);
           layer.setAttribute('preserveAspectRatio', 'none');
           layer.replaceChildren();
-          document.querySelectorAll('.review-highlight[data-annotation-id]').forEach(mark => {
+          reviewRanges.forEach((range, annotationID) => {
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.classList.add('review-outline');
-            path.dataset.annotationId = mark.dataset.annotationId;
-            path.setAttribute('d', outlinePath(Array.from(mark.getClientRects())));
+            path.dataset.annotationId = annotationID;
+            path.setAttribute('d', outlinePath(Array.from(range.getClientRects())));
             layer.appendChild(path);
           });
           window.setSelectedAnnotation(window.selectedReviewAnnotationID || null);
@@ -299,13 +304,8 @@ private enum HTMLPage {
           const range = findTextRange(item.selectedText);
           if (!range) return;
           const block = blockFor(range.startContainer.parentElement);
-          const mark = document.createElement('mark');
-          mark.className = 'review-highlight'; mark.dataset.annotationId = item.id;
           const firstLine = range.getClientRects()[0] || range.getBoundingClientRect();
-          try {
-            mark.appendChild(range.extractContents());
-            range.insertNode(mark);
-          } catch (_) { return; }
+          reviewRanges.set(item.id, range.cloneRange());
           addMarker(block, item, firstLine);
         }
 
