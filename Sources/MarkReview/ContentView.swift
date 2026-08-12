@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+private extension Color {
+    static let reviewBlue = Color(red: 0, green: 122.0 / 255.0, blue: 1)
+}
+
 private struct CommentFrame: Equatable {
     let id: UUID
     let minY: CGFloat
@@ -161,7 +165,7 @@ struct ContentView: View {
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.blue.opacity(0.32), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewBlue.opacity(0.32), lineWidth: 1))
         .contentShape(Rectangle())
         .id(id)
         .background(GeometryReader { geometry in
@@ -209,7 +213,7 @@ struct ContentView: View {
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.blue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewBlue.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
         .id(value.id)
         .background(GeometryReader { geometry in
@@ -226,11 +230,11 @@ struct ContentView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .background(selected ? Color.blue : Color.blue.opacity(0.45), in: Circle())
+            .background(selected ? Color.reviewBlue : Color.reviewBlue.opacity(0.45), in: Circle())
             .overlay {
                 if selected {
                     Circle()
-                        .stroke(Color.blue.opacity(0.35), lineWidth: 3)
+                        .stroke(Color.reviewBlue.opacity(0.35), lineWidth: 3)
                         .padding(-3)
                 }
             }
