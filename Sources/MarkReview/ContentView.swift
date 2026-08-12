@@ -132,6 +132,8 @@ struct ContentView: View {
     @State private var sidebarWidth: CGFloat = 350
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var focusedComment: CommentFocus?
+    @State private var nextPreviewFocusToken = 0
+    @State private var previewFocusRequest: PreviewFocusRequest?
 
     private let renderer = MarkdownRenderer()
 
@@ -152,7 +154,8 @@ struct ContentView: View {
                         onRegion: handleRegion,
                         onFocusAnnotation: selectAnnotation,
                         onVisibleAnnotation: handlePreviewVisibility,
-                        selectedAnnotationID: selectedAnnotationID
+                        selectedAnnotationID: selectedAnnotationID,
+                        focusRequest: previewFocusRequest
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -294,7 +297,11 @@ struct ContentView: View {
             commentEditor(
                 text: Binding(get: { draftComment }, set: updateDraftComment),
                 placeholder: "Type your remark…",
-                focus: .draft
+                focus: .draft,
+                onFocus: {
+                    selectedAnnotationID = id
+                    requestPreviewFocus(id)
+                }
             )
         }
         .padding(11)
@@ -328,7 +335,11 @@ struct ContentView: View {
                     set: { document.updateComment(for: value.id, comment: $0) }
                 ),
                 placeholder: "Type your remark…",
-                focus: .annotation(value.id)
+                focus: .annotation(value.id),
+                onFocus: {
+                    selectedAnnotationID = value.id
+                    requestPreviewFocus(value.id)
+                }
             )
             HStack(spacing: 6) {
                 Spacer()
@@ -373,11 +384,17 @@ struct ContentView: View {
             }
     }
 
-    private func commentEditor(text: Binding<String>, placeholder: String, focus: CommentFocus) -> some View {
+    private func commentEditor(
+        text: Binding<String>,
+        placeholder: String,
+        focus: CommentFocus,
+        onFocus: @escaping () -> Void
+    ) -> some View {
         let editorFocus = Binding<Bool>(
             get: { focusedComment == focus },
             set: { isFocused in
                 if isFocused {
+                    onFocus()
                     focusedComment = focus
                 } else if focusedComment == focus {
                     focusedComment = nil
@@ -540,6 +557,7 @@ struct ContentView: View {
         self.draftComment = ""
         selectedAnnotationID = id
         focusedComment = .annotation(id)
+        requestPreviewFocus(id)
         pendingBottomScrollID = id
         sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .bottom)
         return id
@@ -554,8 +572,14 @@ struct ContentView: View {
 
     private func selectDraft(id: UUID) {
         selectedAnnotationID = id
+        requestPreviewFocus(id)
         scrollDraftToBottom(id)
         focusDraft()
+    }
+
+    private func requestPreviewFocus(_ id: UUID) {
+        nextPreviewFocusToken += 1
+        previewFocusRequest = PreviewFocusRequest(annotationID: id, token: nextPreviewFocusToken)
     }
 
     private func scrollDraftToBottom(_ id: UUID) {
@@ -566,6 +590,7 @@ struct ContentView: View {
     private func selectAnnotation(_ id: UUID) {
         pendingBottomScrollID = nil
         selectedAnnotationID = id
+        requestPreviewFocus(id)
         focusedComment = .annotation(id)
     }
 
@@ -580,7 +605,6 @@ struct ContentView: View {
         guard pendingBottomScrollID == nil else { return }
         guard previewAnnotations.contains(where: { $0.id == id }) else { return }
         selectedAnnotationID = id
-        sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .center)
     }
 
     private func syncFromSidebarScroll(_ frames: [CommentFrame]) {
@@ -590,6 +614,7 @@ struct ContentView: View {
         }
         guard let id = target?.id, selectedAnnotationID != id else { return }
         selectedAnnotationID = id
+        requestPreviewFocus(id)
     }
 
     private func focusDraft() {

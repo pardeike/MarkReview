@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import WebKit
 
+struct PreviewFocusRequest: Equatable {
+    let annotationID: UUID
+    let token: Int
+}
+
 struct PreviewWebView: NSViewRepresentable {
     let html: String
     let annotations: [ReviewAnnotation]
@@ -9,6 +14,7 @@ struct PreviewWebView: NSViewRepresentable {
     let onFocusAnnotation: (UUID) -> Void
     let onVisibleAnnotation: (UUID) -> Void
     let selectedAnnotationID: UUID?
+    let focusRequest: PreviewFocusRequest?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -39,8 +45,9 @@ struct PreviewWebView: NSViewRepresentable {
         }
         context.coordinator.pendingAnnotations = annotations
         context.coordinator.pendingSelectedAnnotationID = selectedAnnotationID
+        context.coordinator.pendingFocusRequest = focusRequest
         context.coordinator.applyAnnotationsWhenReady()
-        context.coordinator.focusSelectedAnnotationWhenReady()
+        context.coordinator.focusRequestedAnnotationWhenReady()
     }
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -55,6 +62,8 @@ struct PreviewWebView: NSViewRepresentable {
         var lastHTML = ""
         var pendingAnnotations: [ReviewAnnotation] = []
         var pendingSelectedAnnotationID: UUID?
+        var pendingFocusRequest: PreviewFocusRequest?
+        var appliedFocusRequestToken: Int?
         var isReady = false
 
         init(
@@ -93,6 +102,7 @@ struct PreviewWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isReady = true
             applyAnnotationsWhenReady()
+            focusRequestedAnnotationWhenReady()
         }
 
         func applyAnnotationsWhenReady() {
@@ -103,9 +113,12 @@ struct PreviewWebView: NSViewRepresentable {
             webView.evaluateJavaScript("window.setAnnotations(\(json), \(selectedID));")
         }
 
-        func focusSelectedAnnotationWhenReady() {
+        func focusRequestedAnnotationWhenReady() {
             guard isReady, let webView else { return }
-            let value = pendingSelectedAnnotationID.map { "\"\($0.uuidString)\"" } ?? "null"
+            guard let request = pendingFocusRequest,
+                  appliedFocusRequestToken != request.token else { return }
+            appliedFocusRequestToken = request.token
+            let value = "\"\(request.annotationID.uuidString)\""
             webView.evaluateJavaScript("window.focusAnnotation(\(value));")
         }
     }
