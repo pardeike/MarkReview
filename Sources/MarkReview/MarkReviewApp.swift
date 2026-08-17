@@ -93,8 +93,23 @@ final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        SessionRestoration.shared.restoreLastSession()
+        let commandLineFiles = Self.fileURLs(fromCommandLineArguments: CommandLine.arguments)
+        if commandLineFiles.isEmpty {
+            SessionRestoration.shared.restoreLastSession()
+        } else {
+            SessionRestoration.shared.openCommandLineFiles(commandLineFiles)
+        }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // Lets a direct launch (e.g. `swift run MarkReview <path>`) open a file without depending
+    // on a saved session or a Finder/Launch Services open event.
+    private static func fileURLs(fromCommandLineArguments arguments: [String]) -> [URL] {
+        arguments.dropFirst().compactMap { argument in
+            guard !argument.hasPrefix("-") else { return nil }
+            let url = URL(fileURLWithPath: argument)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
