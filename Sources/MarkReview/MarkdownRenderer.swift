@@ -8,7 +8,7 @@ struct MarkdownRenderer {
 
     func render(_ markdown: String, contentNonce: String = Self.makeContentNonce()) -> String {
         let document = Document(parsing: markdown)
-        let body = HTMLFormatter.format(document)
+        let body = SafeHTMLFormatter.format(document)
         let accent = SystemAccentPalette.current
         return HTMLPage.template
             .replacingOccurrences(of: "__MARKREVIEW_CONTENT_NONCE__", with: contentNonce)
@@ -55,8 +55,8 @@ private enum HTMLPage {
         table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         a, :not(pre) > code { overflow-wrap: anywhere; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
-        input[type="checkbox"] { width: 14px; height: 14px; margin: 0 .5em 0 0; vertical-align: -2px; accent-color: __REVIEW_ACCENT_SELECTED__; }
-        li:has(> input[type="checkbox"]) { list-style: none; }
+        input[type="checkbox"] { font-size: inherit; width: .875em; height: .875em; margin: 0 .5em 0 0; vertical-align: -.125em; accent-color: __REVIEW_ACCENT_SELECTED__; }
+        ul > li:has(> input[type="checkbox"]) { list-style: none; }
         li > input[type="checkbox"] + p { display: inline; }
         .review-annotated-block { position: relative; }
         #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }

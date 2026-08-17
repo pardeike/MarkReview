@@ -291,6 +291,16 @@ func previewKeepsNativeOrderedListMarkersOutsideReviewMarkers() {
     #expect(rendered.contains("block.classList.add('review-annotated-block')") == false)
 }
 
+@Test("preview preserves ordered task numbers while hiding unordered task bullets")
+func previewPreservesOrderedTaskNumbers() {
+    let rendered = MarkdownRenderer().render("- [ ] Unordered task\n\n1. [x] Ordered task")
+
+    #expect(rendered.contains("<ul>"))
+    #expect(rendered.contains("<ol>"))
+    #expect(rendered.contains("ul > li:has(> input[type=\"checkbox\"]) { list-style: none; }"))
+    #expect(rendered.contains("\n        li:has(> input[type=\"checkbox\"]) { list-style: none; }") == false)
+}
+
 @Test("preview captures and restores the selected occurrence using context")
 func previewCapturesAndRestoresSelectedOccurrenceUsingContext() {
     let rendered = MarkdownRenderer().render("One letter: a. Another letter: a.")
@@ -310,6 +320,8 @@ func previewSupportsRuntimeFontScaling() {
 
     #expect(rendered.contains("--markdown-font-scale: 1"))
     #expect(rendered.contains("font-size: calc(16px * var(--markdown-font-scale))"))
+    #expect(rendered.contains("input[type=\"checkbox\"] { font-size: inherit; width: .875em; height: .875em;"))
+    #expect(rendered.contains("vertical-align: -.125em;"))
     #expect(rendered.contains("window.setMarkdownFontScale = scale"))
     #expect(rendered == renderer.render("# Review", contentNonce: nonce))
     #expect(rendered != renderer.render("# Review", contentNonce: "different-preview-window"))
@@ -322,6 +334,33 @@ func wideMarkdownContentDoesNotWidenDocument() {
     #expect(rendered.contains("pre { max-width: 100%;"))
     #expect(rendered.contains("table { display: block; width: 100%; max-width: 100%; overflow-x: auto;"))
     #expect(rendered.contains("a, :not(pre) > code { overflow-wrap: anywhere; }"))
+}
+
+@Test("preview escapes HTML-like code in fenced blocks and tables")
+func previewEscapesHTMLLikeCode() {
+    let rendered = MarkdownRenderer().render(
+        """
+        ```html
+        <script>
+        ```
+
+        | Example |
+        | --- |
+        | `<section>` |
+        """
+    )
+
+    #expect(rendered.contains("<pre><code class=\"language-html\">&lt;script&gt;"))
+    #expect(rendered.contains("<td><code>&lt;section&gt;</code></td>"))
+    #expect(rendered.contains("<script>") == false)
+}
+
+@Test("preview displays raw HTML as inert source")
+func previewDisplaysRawHTMLAsInertSource() {
+    let rendered = MarkdownRenderer().render("<script>document.body.remove()</script>")
+
+    #expect(rendered.contains("<pre><code class=\"language-html\">&lt;script&gt;document.body.remove()&lt;/script&gt;"))
+    #expect(rendered.contains("<script>document.body.remove()</script>") == false)
 }
 
 @Test("Markdown-only windows can be narrower than review windows")
