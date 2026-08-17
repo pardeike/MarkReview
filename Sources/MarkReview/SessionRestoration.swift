@@ -94,8 +94,24 @@ final class SessionRestoration {
         didRestore = true
         beginLaunchSuppression()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.restoreWhenDocumentSceneIsReady(attempt: 0)
+        whenDocumentSceneIsReady { [weak self] in
+            self?.applyLoadedSession()
+        }
+    }
+
+    // Opens files passed on the command line, bypassing the saved session entirely.
+    // Used so `swift run MarkReview <path>` (or any other direct launch with arguments)
+    // reliably opens a window instead of depending on a prior session existing.
+    func openCommandLineFiles(_ urls: [URL]) {
+        guard !didRestore else { return }
+        didRestore = true
+        beginLaunchSuppression()
+
+        whenDocumentSceneIsReady { [weak self] in
+            guard let self else { return }
+            self.closeUntitledWindows()
+            self.isSuppressingLaunchWindows = false
+            urls.forEach { self.open(url: $0, frame: nil) }
         }
     }
 
@@ -118,26 +134,31 @@ final class SessionRestoration {
         saveCurrentSession()
     }
 
-    private func open(url: URL, frame: NSRect) {
+    private func open(url: URL, frame: NSRect?) {
         if let existing = NSDocumentController.shared.documents.first(where: { $0.fileURL?.standardizedFileURL == url.standardizedFileURL }) {
-            apply(frame: frame, to: existing)
+            if let frame { apply(frame: frame, to: existing) }
             return
         }
 
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { [weak self] document, _, _ in
-            guard let self, let document else { return }
+            guard let self, let document, let frame else { return }
             self.apply(frame: frame, to: document)
         }
     }
 
-    private func restoreWhenDocumentSceneIsReady(attempt: Int) {
+    // Retries until DocumentGroup has created its window scene, since neither a restored
+    // session nor a command-line open has anywhere to attach a window before that happens.
+    private func whenDocumentSceneIsReady(attempt: Int = 0, then completion: @escaping () -> Void) {
         if NSApp.windows.isEmpty, attempt < 8 {
             DispatchQueue.main.async { [weak self] in
-                self?.restoreWhenDocumentSceneIsReady(attempt: attempt + 1)
+                self?.whenDocumentSceneIsReady(attempt: attempt + 1, then: completion)
             }
             return
         }
+        completion()
+    }
 
+    private func applyLoadedSession() {
         let session = load()
         closeUntitledWindows()
         isSuppressingLaunchWindows = false
