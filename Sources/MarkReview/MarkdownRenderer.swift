@@ -16,6 +16,14 @@ struct MarkdownRenderer {
             .replacingOccurrences(of: "__REVIEW_ACCENT_OUTLINE__", with: accent.cssRGBA(alpha: 0.82))
             .replacingOccurrences(of: "__REVIEW_ACCENT_SELECTED__", with: accent.cssRGBA())
             .replacingOccurrences(of: "__REVIEW_ACCENT_RING__", with: accent.cssRGBA(alpha: 0.24))
+            .replacingOccurrences(
+                of: "__MARKREVIEW_MIN_FONT_SCALE__",
+                with: String(MarkReviewDocument.minimumPreviewFontScale)
+            )
+            .replacingOccurrences(
+                of: "__MARKREVIEW_MAX_FONT_SCALE__",
+                with: String(MarkReviewDocument.maximumPreviewFontScale)
+            )
             .replacingOccurrences(of: "__MARKDOWN_BODY__", with: body)
     }
 
@@ -40,9 +48,9 @@ private enum HTMLPage {
       <style nonce="__MARKREVIEW_CONTENT_NONCE__">
         :root { --markdown-font-scale: 1; color-scheme: light dark; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: calc(16px * var(--markdown-font-scale)); line-height: 1.58; color: #202124; background: #fff; }
+        body { position: relative; margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: calc(16px * var(--markdown-font-scale)); line-height: 1.58; color: #202124; background: #fff; }
         @media (prefers-color-scheme: dark) { body { color: #f1f3f4; background: #202124; } a { color: #8ab4f8; } code { background: #303134; color: #f8fafc; } pre, pre code { background: #111827; color: #f8fafc; } blockquote { border-color: #777; color: #c5c7c9; } }
-        #document { max-width: 900px; margin: 0 auto; }
+        #document { max-width: 56.25em; margin: 0 auto; }
         h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 1.5em 0 .55em; letter-spacing: -.015em; }
         h1 { font-size: 2em; } h2 { font-size: 1.55em; } h3 { font-size: 1.25em; }
         p, ul, ol, blockquote, pre, table { margin: .8em 0; }
@@ -59,8 +67,8 @@ private enum HTMLPage {
         ul > li:has(> input[type="checkbox"]) { list-style: none; }
         li > input[type="checkbox"] + p { display: inline; }
         .review-annotated-block { position: relative; }
-        #review-outline-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 2; overflow: visible; pointer-events: none; }
-        #review-marker-layer { position: fixed; top: 0; left: 0; display: block; width: 100vw; height: 100vh; z-index: 3; overflow: visible; pointer-events: none; }
+        #review-outline-layer { position: absolute; top: 0; left: 0; display: block; z-index: 2; overflow: visible; pointer-events: none; }
+        #review-marker-layer { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; z-index: 3; overflow: visible; pointer-events: none; }
         .review-outline { fill: none; stroke: __REVIEW_ACCENT_OUTLINE__; stroke-width: 2px; stroke-linejoin: miter; stroke-linecap: butt; }
         .review-outline.review-muted { stroke: #94a3b8; opacity: .55; }
         .review-outline.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; }
@@ -272,6 +280,17 @@ private enum HTMLPage {
           return range;
         }
 
+        function rectInDocument(rect) {
+          return {
+            left: rect.left + window.scrollX,
+            top: rect.top + window.scrollY,
+            right: rect.right + window.scrollX,
+            bottom: rect.bottom + window.scrollY,
+            width: rect.width,
+            height: rect.height
+          };
+        }
+
         function addMarker(block, item, lineRect) {
           const marker = document.createElement('button');
           const isMuted = item.status === 'muted';
@@ -282,7 +301,8 @@ private enum HTMLPage {
           marker.setAttribute('aria-label', 'Review ' + item.sequence + (isMuted ? ', muted and ignored by agents' : ''));
           const markerLayer = document.getElementById('review-marker-layer');
           if (!markerLayer) return;
-          const rowTop = lineRect.top + (lineRect.height - 24) / 2;
+          const documentLineRect = rectInDocument(lineRect);
+          const rowTop = documentLineRect.top + (documentLineRect.height - 24) / 2;
           const sameRowMarkers = Array.from(markerLayer.querySelectorAll('.review-marker'))
             .filter(existing => Math.abs(parseFloat(existing.dataset.rowTop || 'NaN') - rowTop) < 8);
           marker.dataset.rowTop = String(rowTop);
@@ -298,9 +318,10 @@ private enum HTMLPage {
 
         function positionMarker(marker, lineRect = reviewRanges.get(marker.dataset.annotationId)?.getClientRects()[0]) {
           if (!lineRect) return;
-          const documentRect = root.getBoundingClientRect();
+          const documentRect = rectInDocument(root.getBoundingClientRect());
+          const documentLineRect = rectInDocument(lineRect);
           marker.style.left = (documentRect.left - 38) + 'px';
-          marker.style.top = (lineRect.top + (lineRect.height - 24) / 2) + 'px';
+          marker.style.top = (documentLineRect.top + (documentLineRect.height - 24) / 2) + 'px';
         }
 
         function positionMarkers() {
@@ -352,9 +373,13 @@ private enum HTMLPage {
         function redrawOutlines() {
           const layer = document.getElementById('review-outline-layer');
           if (!layer) return;
-          layer.setAttribute('viewBox', '0 0 ' + window.innerWidth + ' ' + window.innerHeight);
-          layer.setAttribute('width', window.innerWidth);
-          layer.setAttribute('height', window.innerHeight);
+          const width = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+          const height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+          layer.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+          layer.setAttribute('width', width);
+          layer.setAttribute('height', height);
+          layer.style.width = width + 'px';
+          layer.style.height = height + 'px';
           layer.setAttribute('preserveAspectRatio', 'none');
           layer.replaceChildren();
           reviewRanges.forEach((range, annotationID) => {
@@ -362,7 +387,7 @@ private enum HTMLPage {
             path.classList.add('review-outline');
             if (reviewStatuses.get(annotationID) === 'muted') path.classList.add('review-muted');
             path.dataset.annotationId = annotationID;
-            path.setAttribute('d', outlinePath(Array.from(range.getClientRects())));
+            path.setAttribute('d', outlinePath(Array.from(range.getClientRects(), rectInDocument)));
             layer.appendChild(path);
           });
           positionMarkers();
@@ -379,47 +404,212 @@ private enum HTMLPage {
           addMarker(block, item, firstLine);
         }
 
-        window.setAnnotations = (annotations, selectedID) => {
+        let currentReviewAnnotations = [];
+        window.selectedReviewAnnotationID = null;
+
+        function rebuildAnnotationGeometry() {
           clearHighlights();
           const markerLayer = document.createElement('div');
           markerLayer.id = 'review-marker-layer';
           document.body.appendChild(markerLayer);
-          (annotations || []).forEach(item => highlight(item));
+          currentReviewAnnotations.forEach(item => highlight(item));
           const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           layer.id = 'review-outline-layer';
           document.body.appendChild(layer);
           redrawOutlines();
-          window.setSelectedAnnotation(selectedID || null);
+        }
+
+        window.setAnnotations = (annotations, selectedID) => {
+          currentReviewAnnotations.splice(0, currentReviewAnnotations.length, ...(annotations || []));
+          window.selectedReviewAnnotationID = selectedID || null;
+          rebuildAnnotationGeometry();
         };
-        window.selectedReviewAnnotationID = null;
         window.setSelectedAnnotation = id => {
           window.selectedReviewAnnotationID = id || null;
           document.querySelectorAll('.review-selected').forEach(element => element.classList.remove('review-selected'));
           if (!id) return;
           document.querySelectorAll(`[data-annotation-id="${id}"]`).forEach(element => element.classList.add('review-selected'));
         };
-        window.focusAnnotation = id => {
+        window.focusAnnotation = (id, behavior) => {
           window.setSelectedAnnotation(id);
           const marker = document.querySelector(`.review-marker[data-annotation-id="${id}"]`);
           const range = reviewRanges.get(id);
           const anchor = range?.startContainer?.parentElement;
           const target = anchor?.closest('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,td,th') || marker;
-          if (!target) return;
+          if (!target) return false;
           const rect = target.getBoundingClientRect();
           const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-          window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: reduceMotion ? 'auto' : 'smooth' });
+          const scrollBehavior = behavior || (reduceMotion ? 'auto' : 'smooth');
+          window.scrollBy({ top: rect.top - window.innerHeight * 0.25, behavior: scrollBehavior });
+          return true;
         };
 
         window.setMarkdownFontScale = scale => {
-          const normalized = Math.min(2, Math.max(0.75, Number(scale) || 1));
+          const normalized = Math.min(
+            __MARKREVIEW_MAX_FONT_SCALE__,
+            Math.max(__MARKREVIEW_MIN_FONT_SCALE__, Number(scale) || 1)
+          );
+          if (!isRestoringPreviewViewport) beginViewportReflow(true);
           document.documentElement.style.setProperty('--markdown-font-scale', normalized);
+          if (isRestoringPreviewViewport) {
+            window.requestAnimationFrame(redrawOutlines);
+          } else {
+            scheduleViewportReflowAdjustment();
+          }
+        };
+
+        let scrollReportFrame = null;
+        let viewportAnchorFrame = null;
+        let isRestoringPreviewViewport = true;
+        let isPreservingReflowViewport = false;
+        let viewportAnchor = null;
+        let reflowViewportAnchor = null;
+        let reflowAdjustmentFrame = null;
+        let reflowEndTimer = null;
+        let reflowGeneration = 0;
+
+        function caretRangeAtPoint(x, y) {
+          const position = document.caretPositionFromPoint?.(x, y);
+          if (position?.offsetNode) {
+            const range = document.createRange();
+            range.setStart(position.offsetNode, position.offset);
+            range.collapse(true);
+            return range;
+          }
+          return document.caretRangeFromPoint?.(x, y) || null;
+        }
+
+        function textRangeNearViewportCenter() {
+          const centerY = window.innerHeight * 0.5;
+          const rootRect = root.getBoundingClientRect();
+          const centerX = Math.min(
+            Math.max(window.innerWidth * 0.5, rootRect.left + 1),
+            rootRect.right - 1
+          );
+          const verticalOffsets = [0, -8, 8, -24, 24, -48, 48, -96, 96, -160, 160];
+          for (const offset of verticalOffsets) {
+            const range = caretRangeAtPoint(centerX, centerY + offset);
+            const node = range?.startContainer;
+            if (node?.nodeType === Node.TEXT_NODE && root.contains(node) && node.textContent?.trim()) {
+              return range.cloneRange();
+            }
+          }
+          return null;
+        }
+
+        function firstRangeRect(range) {
+          if (!range) return null;
+          const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+          return Number.isFinite(rect?.top) ? rect : null;
+        }
+
+        function captureViewportCenterAnchor() {
+          const range = textRangeNearViewportCenter();
+          const rect = firstRangeRect(range);
+          return range && rect ? { range, viewportY: rect.top } : null;
+        }
+
+        function preserveViewportAnchor(anchor) {
+          const rect = firstRangeRect(anchor?.range);
+          if (!rect) return;
+          const adjustment = rect.top - anchor.viewportY;
+          if (Math.abs(adjustment) < 0.5) return;
+          window.scrollBy({ top: adjustment, behavior: 'auto' });
+        }
+
+        function rememberCurrentViewportAnchor() {
+          if (isRestoringPreviewViewport || isPreservingReflowViewport) return;
+          viewportAnchor = captureViewportCenterAnchor();
+        }
+
+        function scheduleViewportAnchorCapture() {
+          if (viewportAnchorFrame !== null) return;
+          viewportAnchorFrame = window.requestAnimationFrame(() => {
+            viewportAnchorFrame = null;
+            rememberCurrentViewportAnchor();
+          });
+        }
+
+        function beginViewportReflow(captureFreshAnchor = false) {
+          if (!isPreservingReflowViewport) {
+            reflowViewportAnchor = (captureFreshAnchor ? captureViewportCenterAnchor() : viewportAnchor)
+              || captureViewportCenterAnchor();
+            isPreservingReflowViewport = true;
+          }
+        }
+
+        function scheduleViewportReflowAdjustment() {
+          const generation = ++reflowGeneration;
+          if (reflowAdjustmentFrame === null) {
+            reflowAdjustmentFrame = window.requestAnimationFrame(() => {
+              reflowAdjustmentFrame = null;
+              preserveViewportAnchor(reflowViewportAnchor);
+              redrawOutlines();
+            });
+          }
+
+          if (reflowEndTimer !== null) window.clearTimeout(reflowEndTimer);
+          reflowEndTimer = window.setTimeout(() => {
+            reflowEndTimer = null;
+            window.requestAnimationFrame(() => {
+              if (generation !== reflowGeneration) return;
+              preserveViewportAnchor(reflowViewportAnchor);
+              redrawOutlines();
+              window.requestAnimationFrame(() => {
+                if (generation !== reflowGeneration) return;
+                isPreservingReflowViewport = false;
+                reflowViewportAnchor = null;
+                rebuildAnnotationGeometry();
+                viewportAnchor = captureViewportCenterAnchor();
+                reportScrollPosition();
+              });
+            });
+          }, 120);
+        }
+
+        function preserveViewportCenterDuringResize() {
+          if (isRestoringPreviewViewport) return;
+          beginViewportReflow();
+          scheduleViewportReflowAdjustment();
+        }
+
+        function reportScrollPosition() {
+          if (scrollReportFrame !== null) return;
+          scrollReportFrame = window.requestAnimationFrame(() => {
+            scrollReportFrame = null;
+            const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+            const position = maximum > 0 ? window.scrollY / maximum : 0;
+            review()?.postMessage({
+              type: 'previewScrollPosition',
+              position: Math.min(1, Math.max(0, position)),
+              userInitiated: !isRestoringPreviewViewport && !isPreservingReflowViewport
+            });
+          });
+        }
+
+        window.setPreviewScrollPosition = position => {
+          const normalized = Math.min(1, Math.max(0, Number(position) || 0));
+          const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+          window.scrollTo({ top: maximum * normalized, behavior: 'auto' });
           window.requestAnimationFrame(redrawOutlines);
         };
 
+        window.restorePreviewViewport = position => {
+          window.setPreviewScrollPosition(position);
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+            window.setPreviewScrollPosition(position);
+            window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+              isRestoringPreviewViewport = false;
+              viewportAnchor = captureViewportCenterAnchor();
+            }));
+          }));
+        };
+
         window.addEventListener('scroll', () => {
-          redrawOutlines();
+          reportScrollPosition();
+          scheduleViewportAnchorCapture();
         }, { passive: true });
-        window.addEventListener('resize', redrawOutlines);
+        window.addEventListener('resize', preserveViewportCenterDuringResize);
       </script>
     </body>
     </html>

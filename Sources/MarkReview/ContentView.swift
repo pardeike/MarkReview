@@ -141,10 +141,9 @@ struct ContentView: View {
     static let minimumPreviewOnlyWidth: CGFloat = 520
     static let minimumReviewWidth: CGFloat = 800
 
-    private static let minimumPreviewFontScale = 0.75
-    private static let maximumPreviewFontScale = 2.0
-    private static let previewFontScaleStep = 0.1
-    private static let defaultPreviewFontScale = 1.0
+    private static let minimumPreviewFontScale = CGFloat(MarkReviewDocument.minimumPreviewFontScale)
+    private static let maximumPreviewFontScale = CGFloat(MarkReviewDocument.maximumPreviewFontScale)
+    private static let defaultPreviewFontScale = CGFloat(MarkReviewDocument.defaultPreviewFontScale)
 
     @ObservedObject var document: MarkReviewDocument
     private let fileURL: URL?
@@ -162,7 +161,7 @@ struct ContentView: View {
     @State private var nextPreviewFocusToken = 0
     @State private var previewFocusRequest: PreviewFocusRequest?
     @State private var isSidebarVisible: Bool
-    @State private var previewFontScale = ContentView.defaultPreviewFontScale
+    @State private var previewFontScale: CGFloat
     @State private var previewContentNonce: String
 
     private let renderer = MarkdownRenderer()
@@ -177,7 +176,13 @@ struct ContentView: View {
         self.fileURL = fileURL
         let hasMarkdown = !document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldShowForDocumentType = !Self.isMarkdownOnly(fileURL) || !document.annotations.isEmpty
+        let restoredSelection = document.selectedAnnotationID
+        _selectedAnnotationID = State(initialValue: restoredSelection)
+        _sidebarScrollRequest = State(initialValue: restoredSelection.map {
+            SidebarScrollRequest(id: $0, anchor: .center)
+        })
         _isSidebarVisible = State(initialValue: hasMarkdown && shouldShowForDocumentType)
+        _previewFontScale = State(initialValue: CGFloat(document.previewFontScale))
         _previewContentNonce = State(initialValue: MarkdownRenderer.makeContentNonce())
     }
 
@@ -211,13 +216,14 @@ struct ContentView: View {
                             contentNonce: previewContentNonce
                         ),
                         fontScale: previewFontScale,
+                        scrollPosition: document.previewScrollPosition,
                         annotations: previewAnnotations,
                         onRegion: handleRegion,
                         onFocusAnnotation: selectAnnotationFromPreview,
+                        onScrollPositionChange: updatePreviewScrollPosition,
                         selectedAnnotationID: selectedAnnotationID,
                         focusRequest: previewFocusRequest,
-                        onZoom: adjustPreviewFontScale,
-                        onResetZoom: resetPreviewZoom
+                        onFontScaleChange: updatePreviewFontScale
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -255,9 +261,9 @@ struct ContentView: View {
         .onChange(of: focusedComment) { _, focus in
             switch focus {
             case .draft:
-                selectedAnnotationID = draftID
+                updateSelectedAnnotation(draftID)
             case .annotation(let id):
-                selectedAnnotationID = id
+                updateSelectedAnnotation(id)
             case nil:
                 break
             }
@@ -348,7 +354,7 @@ struct ContentView: View {
                 focusToken: commentFocusToken,
                 accessibilityLabel: "New review comment",
                 onFocus: {
-                    selectedAnnotationID = id
+                    updateSelectedAnnotation(id)
                     requestPreviewFocus(id)
                 }
             )
@@ -382,7 +388,7 @@ struct ContentView: View {
                 focusToken: commentFocusToken,
                 accessibilityLabel: "Review comment \(value.sequence)",
                 onFocus: {
-                    selectedAnnotationID = value.id
+                    updateSelectedAnnotation(value.id)
                     requestPreviewFocus(value.id)
                 }
             )
@@ -394,7 +400,7 @@ struct ContentView: View {
                 pillButton("Delete") {
                     removeAnnotation(id: value.id)
                     if selectedAnnotationID == value.id {
-                        selectedAnnotationID = nil
+                        updateSelectedAnnotation(nil)
                         focusedComment = nil
                     }
                 }
@@ -510,6 +516,7 @@ struct ContentView: View {
         )
         mutateDocument { document in
             document.add(annotation)
+            document.selectedAnnotationID = id
         }
         return id
     }
@@ -525,7 +532,7 @@ struct ContentView: View {
             draftID = nil
             draftComment = ""
             updateAnnotationRegion(overlappingID, with: region)
-            selectedAnnotationID = overlappingID
+            updateSelectedAnnotation(overlappingID)
             focusedComment = .annotation(overlappingID)
             return
         }
@@ -533,7 +540,7 @@ struct ContentView: View {
         if draftRegion != nil {
             if draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.draftRegion = region
-                selectedAnnotationID = draftID
+                updateSelectedAnnotation(draftID)
                 if let draftID {
                     scrollDraftToBottom(draftID)
                 }
@@ -546,7 +553,7 @@ struct ContentView: View {
         draftID = id
         draftRegion = region
         draftComment = ""
-        selectedAnnotationID = id
+        updateSelectedAnnotation(id)
         scrollDraftToBottom(id)
         focusDraft()
     }
@@ -611,7 +618,7 @@ struct ContentView: View {
         self.draftRegion = nil
         self.draftID = nil
         self.draftComment = ""
-        selectedAnnotationID = id
+        updateSelectedAnnotation(id)
         focusedComment = .annotation(id)
         requestPreviewFocus(id)
         pendingBottomScrollID = id
@@ -627,7 +634,7 @@ struct ContentView: View {
     }
 
     private func selectDraft(id: UUID) {
-        selectedAnnotationID = id
+        updateSelectedAnnotation(id)
         requestPreviewFocus(id)
         scrollDraftToBottom(id)
         focusDraft()
@@ -636,6 +643,16 @@ struct ContentView: View {
     private func requestPreviewFocus(_ id: UUID) {
         nextPreviewFocusToken += 1
         previewFocusRequest = PreviewFocusRequest(annotationID: id, token: nextPreviewFocusToken)
+    }
+
+    private func updateSelectedAnnotation(_ id: UUID?) {
+        selectedAnnotationID = id
+        let persistentID = id.flatMap { candidate in
+            document.annotations.contains(where: { $0.id == candidate }) ? candidate : nil
+        }
+        guard document.selectedAnnotationID != persistentID else { return }
+        document.selectedAnnotationID = persistentID
+        markDocumentEdited(refreshView: false)
     }
 
     private func scrollDraftToBottom(_ id: UUID) {
@@ -688,7 +705,7 @@ struct ContentView: View {
             _ = promoteDraft()
         }
         pendingBottomScrollID = nil
-        selectedAnnotationID = id
+        updateSelectedAnnotation(id)
         requestPreviewFocus(id)
         focusedComment = .annotation(id)
     }
@@ -765,15 +782,39 @@ struct ContentView: View {
     }
 
     private func resetPreviewZoom() {
-        previewFontScale = Self.defaultPreviewFontScale
+        setPreviewFontScale(Self.defaultPreviewFontScale)
     }
 
     private func adjustPreviewFontScale(_ steps: CGFloat) {
-        let nextScale = previewFontScale + (steps * Self.previewFontScaleStep)
-        previewFontScale = min(
-            max(nextScale, Self.minimumPreviewFontScale),
-            Self.maximumPreviewFontScale
-        )
+        setPreviewFontScale(PreviewZoomInput.adjustedFontScale(previewFontScale, steps: steps))
+    }
+
+    private func setPreviewFontScale(_ scale: CGFloat) {
+        guard abs(previewFontScale - scale) > 0.001 else { return }
+        previewFontScale = scale
+        mutateDocument { document in
+            document.previewFontScale = Double(scale)
+        }
+    }
+
+    private func updatePreviewFontScale(_ scale: CGFloat, phase: PreviewFontScaleChangePhase) {
+        let normalized = CGFloat(MarkReviewDocument.normalizedPreviewFontScale(Double(scale)))
+        if abs(document.previewFontScale - Double(normalized)) > 0.000_001 {
+            document.previewFontScale = Double(normalized)
+            markDocumentEdited(refreshView: false)
+        }
+        if phase == .settled, abs(previewFontScale - normalized) > 0.000_001 {
+            previewFontScale = normalized
+        }
+    }
+
+    private func updatePreviewScrollPosition(_ position: Double, userInitiated: Bool) {
+        let normalized = MarkReviewDocument.normalizedPreviewScrollPosition(position)
+        guard abs(document.previewScrollPosition - normalized) > 0.0001 else { return }
+        document.previewScrollPosition = normalized
+        if userInitiated {
+            markDocumentEdited(refreshView: false)
+        }
     }
 
     private func updateComment(for id: UUID, comment: String) {
@@ -801,7 +842,7 @@ struct ContentView: View {
         markDocumentEdited()
     }
 
-    private func markDocumentEdited() {
+    private func markDocumentEdited(refreshView: Bool = true) {
         let changeState = MarkReviewDocumentChangeState.shared
         let wasDirty = changeState.isDirty(document.id)
         changeState.markDirty(document.id)
@@ -811,7 +852,9 @@ struct ContentView: View {
                 nativeDocument?.updateChangeCount(.changeDone)
             }
         }
-        documentRevision &+= 1
+        if refreshView {
+            documentRevision &+= 1
+        }
     }
 
     private func activeNativeDocument() -> NSDocument? {

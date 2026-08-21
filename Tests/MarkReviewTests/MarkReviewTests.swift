@@ -5,6 +5,14 @@ import Testing
 import UniformTypeIdentifiers
 @testable import MarkReview
 
+@Test("recent documents wait until app launch completes before querying AppKit")
+@MainActor
+func recentDocumentsDeferInitialLoad() {
+    let store = RecentDocumentsStore()
+
+    #expect(store.urls.isEmpty)
+}
+
 @Test("review document round-trips with annotations")
 func documentRoundTrip() throws {
     let annotation = ReviewAnnotation(
@@ -21,6 +29,9 @@ func documentRoundTrip() throws {
         title: "Review",
         sourcePath: "/tmp/source.md",
         originalMarkdown: "# Section one\n\nimportant sentence",
+        previewFontScale: 1.5,
+        previewScrollPosition: 0.42,
+        selectedAnnotationID: annotation.id,
         annotations: [annotation]
     )
     let data = try JSONEncoder.markReview.encode(original)
@@ -31,8 +42,62 @@ func documentRoundTrip() throws {
     #expect(decoded.title == original.title)
     #expect(decoded.sourcePath == original.sourcePath)
     #expect(decoded.originalMarkdown == original.originalMarkdown)
+    #expect(decoded.previewFontScale == original.previewFontScale)
+    #expect(decoded.previewScrollPosition == original.previewScrollPosition)
+    #expect(decoded.selectedAnnotationID == annotation.id)
     #expect(decoded.annotations.map(\.sequence) == original.annotations.map(\.sequence))
     #expect(decoded.annotations.map(\.comment) == original.annotations.map(\.comment))
+}
+
+@Test("older review documents open with default preview state")
+func olderReviewDocumentsUseDefaultPreviewState() throws {
+    let current = MarkReviewDocument(
+        originalMarkdown: "Text",
+        previewFontScale: 1.5,
+        previewScrollPosition: 0.42
+    )
+    let data = try JSONEncoder.markReview.encode(current)
+    guard var payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw CocoaError(.fileReadCorruptFile)
+    }
+    payload.removeValue(forKey: "previewFontScale")
+    payload.removeValue(forKey: "previewScrollPosition")
+    payload.removeValue(forKey: "selectedAnnotationID")
+    let olderData = try JSONSerialization.data(withJSONObject: payload)
+
+    let decoded = try JSONDecoder.markReview.decode(MarkReviewDocument.self, from: olderData)
+
+    #expect(decoded.formatVersion == MarkReviewDocument.currentFormatVersion)
+    #expect(decoded.previewFontScale == MarkReviewDocument.defaultPreviewFontScale)
+    #expect(decoded.previewScrollPosition == MarkReviewDocument.defaultPreviewScrollPosition)
+    #expect(decoded.selectedAnnotationID == nil)
+}
+
+@Test("persisted preview state is constrained to supported values")
+func persistedPreviewStateUsesSupportedValues() {
+    let annotation = ReviewAnnotation(
+        sequence: 1,
+        kind: .text,
+        selectedText: "Text",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "Text",
+        section: "",
+        comment: "Comment"
+    )
+    let document = MarkReviewDocument(
+        originalMarkdown: "Text",
+        previewFontScale: 4,
+        previewScrollPosition: -1,
+        selectedAnnotationID: UUID(),
+        annotations: [annotation]
+    )
+
+    #expect(document.previewFontScale == MarkReviewDocument.maximumPreviewFontScale)
+    #expect(document.previewScrollPosition == 0)
+    #expect(document.selectedAnnotationID == nil)
+    #expect(MarkReviewDocument.minimumPreviewFontScale == 0.5)
+    #expect(MarkReviewDocument.maximumPreviewFontScale == 3.0)
 }
 
 @Test("review documents carry explicit muted-agent instructions")
@@ -167,6 +232,7 @@ func deletingAnnotationClosesSequenceGapWithoutReordering() {
     let document = MarkReviewDocument(
         title: "Review",
         originalMarkdown: "First\n\nSecond\n\nThird",
+        selectedAnnotationID: deletedID,
         annotations: [
             ReviewAnnotation(id: firstID, sequence: 1, kind: .text, selectedText: "First", contextBefore: "", contextAfter: "", blockText: "First", section: "", comment: "First"),
             ReviewAnnotation(id: deletedID, sequence: 2, kind: .text, selectedText: "Second", contextBefore: "", contextAfter: "", blockText: "Second", section: "", comment: "Second"),
@@ -179,6 +245,7 @@ func deletingAnnotationClosesSequenceGapWithoutReordering() {
     #expect(document.annotations.map(\.id) == [firstID, lastID])
     #expect(document.annotations.map(\.sequence) == [1, 2])
     #expect(document.annotations.map(\.selectedText) == ["First", "Third"])
+    #expect(document.selectedAnnotationID == nil)
 }
 
 @Test("renumbering recovers positions from rendered Markdown syntax")
@@ -281,6 +348,10 @@ func previewPositionsMarkersFromDocumentRail() {
     #expect(rendered.contains("documentRect.left - 38"))
     #expect(rendered.contains("markerLayer.appendChild(marker)"))
     #expect(rendered.contains("positionMarkers()"))
+    #expect(rendered.contains("#review-outline-layer { position: absolute"))
+    #expect(rendered.contains("left: rect.left + window.scrollX"))
+    #expect(rendered.contains("top: rect.top + window.scrollY"))
+    #expect(rendered.contains("Array.from(range.getClientRects(), rectInDocument)"))
 }
 
 @Test("preview keeps native ordered-list markers outside review markers")
@@ -320,11 +391,54 @@ func previewSupportsRuntimeFontScaling() {
 
     #expect(rendered.contains("--markdown-font-scale: 1"))
     #expect(rendered.contains("font-size: calc(16px * var(--markdown-font-scale))"))
+    #expect(rendered.contains("#document { max-width: 56.25em;"))
+    #expect(rendered.contains("max-width: 900px") == false)
     #expect(rendered.contains("input[type=\"checkbox\"] { font-size: inherit; width: .875em; height: .875em;"))
     #expect(rendered.contains("vertical-align: -.125em;"))
     #expect(rendered.contains("window.setMarkdownFontScale = scale"))
+    #expect(rendered.contains("3.0,"))
+    #expect(rendered.contains("Math.max(0.5, Number(scale) || 1)"))
+    #expect(rendered.contains("__MARKREVIEW_MIN_FONT_SCALE__") == false)
+    #expect(rendered.contains("__MARKREVIEW_MAX_FONT_SCALE__") == false)
     #expect(rendered == renderer.render("# Review", contentNonce: nonce))
     #expect(rendered != renderer.render("# Review", contentNonce: "different-preview-window"))
+}
+
+@Test("preview restores its saved scroll position independently of selection")
+func previewReportsAndRestoresScrollPosition() {
+    let rendered = MarkdownRenderer().render("# Review\n\nText")
+    let compact = rendered.filter { !$0.isWhitespace }
+
+    #expect(rendered.contains("window.setPreviewScrollPosition = position"))
+    #expect(compact.contains("window.restorePreviewViewport=position=>{window.setPreviewScrollPosition(position);window.requestAnimationFrame"))
+    #expect(rendered.contains("window.requestAnimationFrame(() => window.requestAnimationFrame"))
+    #expect(rendered.contains("window.setPreviewScrollPosition(position)"))
+    #expect(rendered.contains("!window.focusAnnotation(selectedID, 'auto')") == false)
+    #expect(rendered.contains("document.documentElement.scrollHeight - window.innerHeight"))
+    #expect(rendered.contains("type: 'previewScrollPosition'"))
+    #expect(rendered.contains("userInitiated: !isRestoringPreviewViewport"))
+    #expect(rendered.contains("isRestoringPreviewViewport = false"))
+}
+
+@Test("preview keeps the centered text position near the center across layout reflow")
+func previewPreservesCenteredTextAcrossLayoutReflow() {
+    let rendered = MarkdownRenderer().render("# Review\n\nText")
+    let compact = rendered.filter { !$0.isWhitespace }
+
+    #expect(rendered.contains("function captureViewportCenterAnchor()"))
+    #expect(rendered.contains("const centerY = window.innerHeight * 0.5"))
+    #expect(rendered.contains("const adjustment = rect.top - anchor.viewportY"))
+    #expect(rendered.contains("window.scrollBy({ top: adjustment, behavior: 'auto' })"))
+    #expect(compact.contains("functionpreserveViewportCenterDuringResize(){if(isRestoringPreviewViewport)return;"))
+    #expect(rendered.contains("window.addEventListener('resize', preserveViewportCenterDuringResize)"))
+    #expect(rendered.contains("userInitiated: !isRestoringPreviewViewport && !isPreservingReflowViewport"))
+    #expect(compact.contains("rebuildAnnotationGeometry();viewportAnchor=captureViewportCenterAnchor();"))
+    #expect(rendered.contains("if (!isRestoringPreviewViewport) beginViewportReflow(true)"))
+    #expect(rendered.contains("document.documentElement.style.setProperty('--markdown-font-scale', normalized)"))
+    #expect(rendered.contains("scheduleViewportReflowAdjustment()"))
+    #expect(rendered.contains("function scheduleViewportAnchorCapture()"))
+    #expect(rendered.contains("const generation = ++reflowGeneration"))
+    #expect(rendered.components(separatedBy: "if (generation !== reflowGeneration) return").count == 3)
 }
 
 @Test("wide Markdown content scrolls locally instead of widening the document")
@@ -390,6 +504,96 @@ func previewZoomInputs() {
     #expect(PreviewZoomInput.usesScrollZoom(modifiers: [.option]))
     #expect(PreviewZoomInput.usesScrollZoom(modifiers: [.command]))
     #expect(!PreviewZoomInput.usesScrollZoom(modifiers: []))
+}
+
+@Test("precise scroll zoom follows every gesture update proportionally")
+func preciseScrollZoomIsContinuous() {
+    #expect(PreviewZoomInput.preciseScrollSteps(for: 0.25) > 0)
+    #expect(PreviewZoomInput.preciseScrollSteps(for: 12) == 1)
+    #expect(PreviewZoomInput.preciseScrollSteps(for: -6) == -0.5)
+    #expect(PreviewZoomInput.adjustedFontScale(1, steps: 0.5) == 1.05)
+    #expect(PreviewZoomInput.adjustedFontScale(3, steps: 1) == 3)
+    #expect(PreviewZoomInput.adjustedFontScale(0.5, steps: -1) == 0.5)
+}
+
+@Test("WebKit zoom applies and records a font change before settling SwiftUI state")
+func webKitZoomAppliesImmediately() {
+    var changes: [(scale: CGFloat, phase: PreviewFontScaleChangePhase)] = []
+    let coordinator = PreviewWebView.Coordinator(
+        onRegion: { _ in },
+        onFocusAnnotation: { _ in },
+        onScrollPositionChange: { _, _ in },
+        onFontScaleChange: { scale, phase in
+            changes.append((scale, phase))
+        }
+    )
+    coordinator.updatePendingFontScale(1)
+
+    coordinator.adjustFontScaleImmediately(by: 0.5)
+    coordinator.cancelFontScaleSettlement()
+
+    #expect(changes.count == 1)
+    #expect(changes.first?.scale == 1.05)
+    #expect(changes.first?.phase == .changing)
+    #expect(coordinator.appliedFontScale == nil)
+    #expect(coordinator.stagedFontScale == 1.05)
+}
+
+@Test("preview queues only one navigation per HTML revision")
+func previewLoadsEachHTMLRevisionOnce() {
+    let coordinator = PreviewWebView.Coordinator(
+        onRegion: { _ in },
+        onFocusAnnotation: { _ in },
+        onScrollPositionChange: { _, _ in },
+        onFontScaleChange: { _, _ in }
+    )
+
+    #expect(coordinator.prepareHTMLLoad("first"))
+    coordinator.isReady = true
+    coordinator.appliedFontScale = 1
+    coordinator.didRestoreInitialViewport = true
+    coordinator.appliedFocusRequestToken = 1
+
+    #expect(!coordinator.prepareHTMLLoad("first"))
+    #expect(coordinator.isReady)
+    #expect(coordinator.didRestoreInitialViewport)
+
+    #expect(coordinator.prepareHTMLLoad("second"))
+    #expect(!coordinator.isReady)
+    #expect(coordinator.appliedFontScale == nil)
+    #expect(!coordinator.didRestoreInitialViewport)
+    #expect(coordinator.appliedFocusRequestToken == nil)
+}
+
+@Test("unchanged annotations do not rebuild their geometry during zoom")
+func unchangedAnnotationsDoNotRebuildDuringZoom() {
+    let annotation = ReviewAnnotation(
+        sequence: 1,
+        kind: .text,
+        selectedText: "Text",
+        contextBefore: "",
+        contextAfter: "",
+        blockText: "Text",
+        section: "",
+        comment: "Review"
+    )
+    let coordinator = PreviewWebView.Coordinator(
+        onRegion: { _ in },
+        onFocusAnnotation: { _ in },
+        onScrollPositionChange: { _, _ in },
+        onFontScaleChange: { _, _ in }
+    )
+    coordinator.pendingAnnotations = [annotation]
+    coordinator.pendingSelectedAnnotationID = annotation.id
+
+    #expect(coordinator.pendingAnnotationUpdate == .all)
+
+    coordinator.appliedAnnotations = [annotation]
+    coordinator.appliedSelectedAnnotationID = annotation.id
+    #expect(coordinator.pendingAnnotationUpdate == .none)
+
+    coordinator.pendingSelectedAnnotationID = nil
+    #expect(coordinator.pendingAnnotationUpdate == .selection(nil))
 }
 
 @Test("preview stacks same-row review markers for hover inspection")
@@ -462,12 +666,16 @@ func documentChangeStateTracksEditsUntilExplicitlyCleared() {
 @Test("reference document snapshots are detached from later edits")
 func referenceDocumentSnapshotsAreDetachedFromLaterEdits() throws {
     let id = UUID()
+    let annotationID = UUID()
     let document = MarkReviewDocument(
         id: id,
         title: "Review",
         originalMarkdown: "Text",
+        previewFontScale: 1.4,
+        previewScrollPosition: 0.35,
+        selectedAnnotationID: annotationID,
         annotations: [ReviewAnnotation(
-            id: UUID(),
+            id: annotationID,
             sequence: 1,
             kind: .text,
             selectedText: "Text",
@@ -481,8 +689,14 @@ func referenceDocumentSnapshotsAreDetachedFromLaterEdits() throws {
 
     let snapshot = try document.snapshot(contentType: .markReview)
     document.updateComment(for: document.annotations[0].id, comment: "After")
+    document.previewFontScale = 1.8
+    document.previewScrollPosition = 0.8
+    document.selectedAnnotationID = nil
 
     #expect(snapshot.id == id)
+    #expect(snapshot.previewFontScale == 1.4)
+    #expect(snapshot.previewScrollPosition == 0.35)
+    #expect(snapshot.selectedAnnotationID == annotationID)
     #expect(snapshot.annotations[0].comment == "Before")
     #expect(document.annotations[0].comment == "After")
 }

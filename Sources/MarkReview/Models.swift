@@ -140,6 +140,10 @@ public struct ReviewAnnotation: Identifiable, Codable, Equatable {
 public final class MarkReviewDocument: Codable, Equatable, ObservableObject, ReferenceFileDocument, @unchecked Sendable {
     public static let currentFormatVersion = 1
     public static let currentAgentInstructions = "Act only on annotations whose status is open. Ignore annotations whose status is muted."
+    static let minimumPreviewFontScale = 0.5
+    static let maximumPreviewFontScale = 3.0
+    static let defaultPreviewFontScale = 1.0
+    static let defaultPreviewScrollPosition = 0.0
 
     // The editor intentionally does not publish document mutations. SwiftUI's
     // DocumentGroup treats published reference-document changes as save-worthy;
@@ -155,6 +159,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
     public var title: String
     public var sourcePath: String?
     public var originalMarkdown: String
+    public var previewFontScale: Double
+    public var previewScrollPosition: Double
+    public var selectedAnnotationID: UUID?
     public var annotations: [ReviewAnnotation]
 
     public init(
@@ -162,6 +169,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         title: String = "Untitled review",
         sourcePath: String? = nil,
         originalMarkdown: String = "",
+        previewFontScale: Double = 1.0,
+        previewScrollPosition: Double = 0.0,
+        selectedAnnotationID: UUID? = nil,
         annotations: [ReviewAnnotation] = []
     ) {
         self.id = id
@@ -170,7 +180,10 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         self.title = title
         self.sourcePath = sourcePath
         self.originalMarkdown = originalMarkdown
+        self.previewFontScale = Self.normalizedPreviewFontScale(previewFontScale)
+        self.previewScrollPosition = Self.normalizedPreviewScrollPosition(previewScrollPosition)
         self.annotations = annotations
+        self.selectedAnnotationID = Self.validSelectedAnnotationID(selectedAnnotationID, in: annotations)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -180,6 +193,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         case title
         case sourcePath
         case originalMarkdown
+        case previewFontScale
+        case previewScrollPosition
+        case selectedAnnotationID
         case annotations
     }
 
@@ -199,7 +215,32 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Untitled review"
         sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
         originalMarkdown = try container.decodeIfPresent(String.self, forKey: .originalMarkdown) ?? ""
+        previewFontScale = Self.normalizedPreviewFontScale(
+            try container.decodeIfPresent(Double.self, forKey: .previewFontScale) ?? Self.defaultPreviewFontScale
+        )
+        previewScrollPosition = Self.normalizedPreviewScrollPosition(
+            try container.decodeIfPresent(Double.self, forKey: .previewScrollPosition) ?? Self.defaultPreviewScrollPosition
+        )
         annotations = try container.decodeIfPresent([ReviewAnnotation].self, forKey: .annotations) ?? []
+        selectedAnnotationID = Self.validSelectedAnnotationID(
+            try container.decodeIfPresent(UUID.self, forKey: .selectedAnnotationID),
+            in: annotations
+        )
+    }
+
+    static func normalizedPreviewFontScale(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultPreviewFontScale }
+        return min(max(value, minimumPreviewFontScale), maximumPreviewFontScale)
+    }
+
+    static func normalizedPreviewScrollPosition(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultPreviewScrollPosition }
+        return min(max(value, 0), 1)
+    }
+
+    private static func validSelectedAnnotationID(_ id: UUID?, in annotations: [ReviewAnnotation]) -> UUID? {
+        guard let id, annotations.contains(where: { $0.id == id }) else { return nil }
+        return id
     }
 
     public var nextSequence: Int {
@@ -247,6 +288,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         let removedSequence = annotations[index].sequence
         annotations.remove(at: index)
+        if selectedAnnotationID == id {
+            selectedAnnotationID = nil
+        }
         for index in annotations.indices where annotations[index].sequence > removedSequence {
             annotations[index].sequence -= 1
         }
@@ -272,6 +316,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
         title = replacement.title
         sourcePath = replacement.sourcePath
         originalMarkdown = replacement.originalMarkdown
+        previewFontScale = replacement.previewFontScale
+        previewScrollPosition = replacement.previewScrollPosition
+        selectedAnnotationID = replacement.selectedAnnotationID
         annotations = replacement.annotations
     }
 
@@ -281,6 +328,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
             title: title,
             sourcePath: sourcePath,
             originalMarkdown: originalMarkdown,
+            previewFontScale: previewFontScale,
+            previewScrollPosition: previewScrollPosition,
+            selectedAnnotationID: selectedAnnotationID,
             annotations: annotations
         )
         copied.formatVersion = formatVersion
@@ -294,6 +344,9 @@ public final class MarkReviewDocument: Codable, Equatable, ObservableObject, Ref
             && lhs.title == rhs.title
             && lhs.sourcePath == rhs.sourcePath
             && lhs.originalMarkdown == rhs.originalMarkdown
+            && lhs.previewFontScale == rhs.previewFontScale
+            && lhs.previewScrollPosition == rhs.previewScrollPosition
+            && lhs.selectedAnnotationID == rhs.selectedAnnotationID
             && lhs.annotations == rhs.annotations
     }
 

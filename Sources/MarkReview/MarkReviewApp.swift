@@ -26,14 +26,99 @@ extension FocusedValues {
     }
 }
 
+@MainActor
+final class RecentDocumentsStore: ObservableObject {
+    @Published private(set) var urls: [URL]
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        urls = []
+        for notificationName in [
+            NSApplication.didFinishLaunchingNotification,
+            NSWindow.didBecomeKeyNotification
+        ] {
+            observers.append(NotificationCenter.default.addObserver(
+                forName: notificationName,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.reload()
+                }
+            })
+        }
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    func open(_ url: URL) {
+        let controller = NSDocumentController.shared
+        controller.openDocument(withContentsOf: url, display: true) { [weak self] _, _, error in
+            if let error {
+                controller.presentError(error)
+            } else {
+                controller.noteNewRecentDocumentURL(url)
+            }
+            self?.reload()
+        }
+    }
+
+    func clear() {
+        NSDocumentController.shared.clearRecentDocuments(nil)
+        reload()
+    }
+
+    private func reload() {
+        let currentURLs = NSDocumentController.shared.recentDocumentURLs
+        guard currentURLs != urls else { return }
+        urls = currentURLs
+    }
+}
+
 struct MarkReviewCommands: Commands {
     @FocusedValue(\.markReviewActions) private var actions
+    @ObservedObject var recentDocuments: RecentDocumentsStore
 
     private var target: MarkReviewActions? {
         MarkReviewWindowActions.resolve(actions)
     }
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New") {
+                NSDocumentController.shared.newDocument(nil)
+            }
+            .keyboardShortcut("n", modifiers: [.command])
+
+            Button("Open…") {
+                NSDocumentController.shared.openDocument(nil)
+            }
+            .keyboardShortcut("o", modifiers: [.command])
+
+            Menu("Open Recent") {
+                if recentDocuments.urls.isEmpty {
+                    Button("No Recent Documents") {}
+                        .disabled(true)
+                } else {
+                    ForEach(recentDocuments.urls, id: \.self) { url in
+                        Button(url.lastPathComponent) {
+                            recentDocuments.open(url)
+                        }
+                        .help(url.path)
+                    }
+                }
+
+                Divider()
+
+                Button("Clear Menu") {
+                    recentDocuments.clear()
+                }
+                .disabled(recentDocuments.urls.isEmpty)
+            }
+        }
+
         CommandGroup(replacing: .saveItem) {
             Button("Close Window") {
                 MarkReviewWindowActions.resolve(actions)?.closeWindow()
@@ -128,11 +213,12 @@ final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MarkReviewApp: App {
     @NSApplicationDelegateAdaptor(MarkReviewAppDelegate.self) private var appDelegate
+    @StateObject private var recentDocuments = RecentDocumentsStore()
 
     var body: some Scene {
         DocumentGroup(newDocument: { MarkReviewDocument() }) { file in
             ContentView(document: file.document, fileURL: file.fileURL)
         }
-        .commands { MarkReviewCommands() }
+        .commands { MarkReviewCommands(recentDocuments: recentDocuments) }
     }
 }
