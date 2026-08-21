@@ -49,11 +49,18 @@ not create a second export format.
 ## Simple, focused tools
 
 - Linked highlights and comment cards make even short selections easy to find.
+- Press Escape while editing a comment to deselect it; an empty comment is
+  removed automatically.
+- Find text in the rendered document with Command-F, a live match count,
+  previous/next navigation, and `!` markers beside every matching row.
 - Review numbers can be reset to top-to-bottom document order at any time.
+- Choose a review color from the Review menu, including presets and any custom
+  color from the macOS color picker.
 - Reading size can be changed from the View menu, with Command-plus/minus/zero,
   by Option- or Command-scrolling, or with a trackpad pinch.
 - Markdown and MarkReview files have different Finder icons.
-- MarkReview follows the macOS accent color and supports light and dark mode.
+- Find and ordinary controls follow the macOS tint color, and the whole app
+  supports light and dark mode.
 
 MarkReview is a review tool, not a Markdown editor. It stores a snapshot of the
 Markdown you opened, so later edits to the source file cannot silently change

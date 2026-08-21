@@ -6,16 +6,27 @@ struct MarkdownRenderer {
         UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
-    func render(_ markdown: String, contentNonce: String = Self.makeContentNonce()) -> String {
+    func render(
+        _ markdown: String,
+        contentNonce: String = Self.makeContentNonce(),
+        reviewColor: AppColorPalette = ReviewColorPreset.orange.palette
+    ) -> String {
         let document = Document(parsing: markdown)
         let body = SafeHTMLFormatter.format(document)
-        let accent = SystemAccentPalette.current
+        let findColor = AppColorPalette.systemAccent
         return HTMLPage.template
             .replacingOccurrences(of: "__MARKREVIEW_CONTENT_NONCE__", with: contentNonce)
-            .replacingOccurrences(of: "__REVIEW_ACCENT_MUTED__", with: accent.cssRGBA(alpha: 0.45))
-            .replacingOccurrences(of: "__REVIEW_ACCENT_OUTLINE__", with: accent.cssRGBA(alpha: 0.82))
-            .replacingOccurrences(of: "__REVIEW_ACCENT_SELECTED__", with: accent.cssRGBA())
-            .replacingOccurrences(of: "__REVIEW_ACCENT_RING__", with: accent.cssRGBA(alpha: 0.24))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_MUTED__", with: reviewColor.cssRGBA(alpha: 0.45))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_OUTLINE__", with: reviewColor.cssRGBA(alpha: 0.82))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_SELECTED__", with: reviewColor.cssRGBA())
+            .replacingOccurrences(of: "__REVIEW_ACCENT_RING__", with: reviewColor.cssRGBA(alpha: 0.24))
+            .replacingOccurrences(of: "__REVIEW_ACCENT_TEXT__", with: reviewColor.contrastingCSSTextColor)
+            .replacingOccurrences(of: "__SYSTEM_ACCENT_SELECTED__", with: findColor.cssRGBA())
+            .replacingOccurrences(of: "__FIND_ACCENT_MUTED__", with: findColor.cssRGBA(alpha: 0.22))
+            .replacingOccurrences(of: "__FIND_ACCENT_OUTLINE__", with: findColor.cssRGBA(alpha: 0.52))
+            .replacingOccurrences(of: "__FIND_ACCENT_CURRENT__", with: findColor.cssRGBA(alpha: 0.42))
+            .replacingOccurrences(of: "__FIND_ACCENT_RING__", with: findColor.cssRGBA(alpha: 0.82))
+            .replacingOccurrences(of: "__FIND_ACCENT_SELECTED__", with: findColor.cssRGBA())
             .replacingOccurrences(
                 of: "__MARKREVIEW_MIN_FONT_SCALE__",
                 with: String(MarkReviewDocument.minimumPreviewFontScale)
@@ -63,9 +74,15 @@ private enum HTMLPage {
         table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         a, :not(pre) > code { overflow-wrap: anywhere; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
-        input[type="checkbox"] { font-size: inherit; width: .875em; height: .875em; margin: 0 .5em 0 0; vertical-align: -.125em; accent-color: __REVIEW_ACCENT_SELECTED__; }
+        input[type="checkbox"] { font-size: inherit; width: .875em; height: .875em; margin: 0 .5em 0 0; vertical-align: -.125em; accent-color: __SYSTEM_ACCENT_SELECTED__; }
         ul > li:has(> input[type="checkbox"]) { list-style: none; }
         li > input[type="checkbox"] + p { display: inline; }
+        #content-find-layer { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; }
+        .content-find-highlight { position: absolute; border-radius: 3px; background: __FIND_ACCENT_MUTED__; box-shadow: inset 0 0 0 1px __FIND_ACCENT_OUTLINE__; }
+        .content-find-highlight.content-find-current { background: __FIND_ACCENT_CURRENT__; box-shadow: 0 0 0 2px __FIND_ACCENT_RING__, inset 0 0 0 1px rgba(255, 255, 255, .28); }
+        #content-find-marker-layer { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; z-index: 4; overflow: visible; pointer-events: none; }
+        .content-find-marker { position: absolute; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: __FIND_ACCENT_SELECTED__; opacity: .62; font: 900 22px/24px -apple-system, BlinkMacSystemFont, sans-serif; }
+        .content-find-marker.content-find-current { opacity: 1; }
         .review-annotated-block { position: relative; }
         #review-outline-layer { position: absolute; top: 0; left: 0; display: block; z-index: 2; overflow: visible; pointer-events: none; }
         #review-marker-layer { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; z-index: 3; overflow: visible; pointer-events: none; }
@@ -73,11 +90,11 @@ private enum HTMLPage {
         .review-outline.review-muted { stroke: #94a3b8; opacity: .55; }
         .review-outline.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; }
         .review-outline.review-muted.review-selected { stroke: __REVIEW_ACCENT_SELECTED__; opacity: 1; }
-        .review-marker { position: absolute; left: 0; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: #fff; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: auto; transform: translateX(var(--stack-offset, 0px)); transition: transform .12s ease, box-shadow .12s ease; }
+        .review-marker { position: absolute; left: 0; top: 0; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; color: __REVIEW_ACCENT_TEXT__; background: __REVIEW_ACCENT_MUTED__; box-shadow: 0 1px 3px rgba(0,0,0,.14); cursor: pointer; font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: auto; transform: translateX(calc(var(--stack-offset, 0px) + var(--find-offset, 0px))); transition: transform .12s ease, box-shadow .12s ease; }
         .review-marker.review-selected { z-index: 10; background: __REVIEW_ACCENT_SELECTED__; box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 1px 3px rgba(0,0,0,.18); }
-        .review-marker:hover { z-index: 100; transform: translateX(var(--stack-offset, 0px)) scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.28); }
+        .review-marker:hover { z-index: 100; transform: translateX(calc(var(--stack-offset, 0px) + var(--find-offset, 0px))) scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.28); }
         .review-marker.review-selected:hover { box-shadow: 0 0 0 3px __REVIEW_ACCENT_RING__, 0 2px 6px rgba(0,0,0,.28); }
-        .review-marker.review-muted { background: #94a3b8; }
+        .review-marker.review-muted { color: #fff; background: #94a3b8; }
         #hint { position: fixed; right: 18px; bottom: 14px; opacity: .55; font-size: calc(12px * var(--markdown-font-scale)); pointer-events: none; }
         @media (prefers-reduced-motion: reduce) { .review-marker { transition: none; } }
       </style>
@@ -90,6 +107,9 @@ private enum HTMLPage {
         const root = document.getElementById('document');
         const reviewRanges = new Map();
         const reviewStatuses = new Map();
+        const contentFindRanges = [];
+        let currentContentFindQuery = '';
+        let currentContentFindIndex = -1;
 
         function sectionFor(element) {
           const headings = [];
@@ -205,10 +225,7 @@ private enum HTMLPage {
           return (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
         }
 
-        function findTextRange(text, item) {
-          const target = (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
-          if (!target) return;
-
+        function searchableTextIndex() {
           const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
           const characters = [];
           while (walker.nextNode()) {
@@ -242,6 +259,13 @@ private enum HTMLPage {
             });
             previousWasWhitespace = false;
           });
+          return { normalized, positions };
+        }
+
+        function findTextRange(text, item) {
+          const target = (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!target) return;
+          const { normalized, positions } = searchableTextIndex();
 
           const candidates = [];
           let index = normalized.indexOf(target);
@@ -291,6 +315,186 @@ private enum HTMLPage {
           };
         }
 
+        function rangesForContentFind(query) {
+          const target = normalizeForSearch(query);
+          if (!target) return [];
+          const { normalized, positions } = searchableTextIndex();
+          const ranges = [];
+          let index = normalized.indexOf(target);
+          while (index >= 0) {
+            const first = positions[index];
+            const last = positions[index + target.length - 1];
+            if (first && last) {
+              const range = document.createRange();
+              range.setStart(first.start.node, first.start.offset);
+              range.setEnd(last.end.node, last.end.offset);
+              ranges.push(range);
+            }
+            index = normalized.indexOf(target, index + Math.max(target.length, 1));
+          }
+          return ranges;
+        }
+
+        function contentFindResult() {
+          return {
+            query: currentContentFindQuery,
+            count: contentFindRanges.length,
+            activeIndex: currentContentFindIndex
+          };
+        }
+
+        function contentFindRangeRect(range) {
+          if (!range) return null;
+          const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+          return rect && Number.isFinite(rect.top) ? rect : null;
+        }
+
+        function initialContentFindIndex() {
+          if (!contentFindRanges.length) return -1;
+          const visibleIndex = contentFindRanges.findIndex(range => {
+            const rect = contentFindRangeRect(range);
+            return rect && rect.bottom >= 12 && rect.top <= window.innerHeight - 12;
+          });
+          if (visibleIndex >= 0) return visibleIndex;
+          const followingIndex = contentFindRanges.findIndex(range => {
+            const rect = contentFindRangeRect(range);
+            return rect && rect.bottom >= 12;
+          });
+          return followingIndex >= 0 ? followingIndex : 0;
+        }
+
+        function redrawContentFindHighlights() {
+          document.getElementById('content-find-layer')?.remove();
+          document.getElementById('content-find-marker-layer')?.remove();
+          reconcileContentFindMarkerCollisions();
+          if (!contentFindRanges.length) return;
+
+          const layer = document.createElement('div');
+          layer.id = 'content-find-layer';
+          const markerLayer = document.createElement('div');
+          markerLayer.id = 'content-find-marker-layer';
+          const width = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+          const height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+          layer.style.width = width + 'px';
+          layer.style.height = height + 'px';
+          markerLayer.style.width = width + 'px';
+          markerLayer.style.height = height + 'px';
+          const rows = [];
+
+          contentFindRanges.forEach((range, matchIndex) => {
+            Array.from(range.getClientRects()).forEach(rect => {
+              if (rect.width <= 0 || rect.height <= 0) return;
+              const documentRect = rectInDocument(rect);
+              const rowTop = documentRect.top + (documentRect.height - 24) / 2;
+              let row = rows.find(candidate => Math.abs(candidate.top - rowTop) < 8);
+              if (!row) {
+                row = { top: rowTop, matchIndices: [] };
+                rows.push(row);
+              }
+              if (!row.matchIndices.includes(matchIndex)) row.matchIndices.push(matchIndex);
+
+              const highlight = document.createElement('div');
+              highlight.className = 'content-find-highlight';
+              if (matchIndex === currentContentFindIndex) {
+                highlight.classList.add('content-find-current');
+              }
+              highlight.dataset.matchIndex = String(matchIndex);
+              highlight.style.left = (documentRect.left - 1) + 'px';
+              highlight.style.top = (documentRect.top - 1) + 'px';
+              highlight.style.width = (documentRect.width + 2) + 'px';
+              highlight.style.height = (documentRect.height + 2) + 'px';
+              layer.appendChild(highlight);
+            });
+          });
+
+          rows.forEach(row => {
+            const marker = document.createElement('div');
+            marker.className = 'content-find-marker';
+            if (row.matchIndices.includes(currentContentFindIndex)) {
+              marker.classList.add('content-find-current');
+            }
+            marker.dataset.matchIndices = row.matchIndices.join(' ');
+            marker.dataset.rowTop = String(row.top);
+            marker.textContent = '!';
+            marker.setAttribute('aria-hidden', 'true');
+            marker.style.top = row.top + 'px';
+            markerLayer.appendChild(marker);
+          });
+
+          document.body.appendChild(layer);
+          document.body.appendChild(markerLayer);
+          reconcileContentFindMarkerCollisions();
+        }
+
+        function reconcileContentFindMarkerCollisions() {
+          const documentRect = rectInDocument(root.getBoundingClientRect());
+          const reviewMarkers = Array.from(document.querySelectorAll('.review-marker'));
+          reviewMarkers.forEach(marker => marker.style.removeProperty('--find-offset'));
+          document.querySelectorAll('.content-find-marker').forEach(findMarker => {
+            const rowTop = parseFloat(findMarker.dataset.rowTop || 'NaN');
+            const sameRowReviewMarkers = reviewMarkers.filter(marker =>
+              Math.abs(parseFloat(marker.dataset.rowTop || 'NaN') - rowTop) < 8
+            );
+            findMarker.style.left = (documentRect.left - (sameRowReviewMarkers.length ? 52 : 38)) + 'px';
+            sameRowReviewMarkers.forEach(marker => {
+              marker.style.setProperty('--find-offset', '10px');
+            });
+          });
+        }
+
+        function updateContentFindActiveState(previousIndex) {
+          if (previousIndex >= 0) {
+            document.querySelectorAll(
+              `.content-find-highlight[data-match-index="${previousIndex}"], .content-find-marker[data-match-indices~="${previousIndex}"]`
+            ).forEach(element => element.classList.remove('content-find-current'));
+          }
+          if (currentContentFindIndex >= 0) {
+            document.querySelectorAll(
+              `.content-find-highlight[data-match-index="${currentContentFindIndex}"], .content-find-marker[data-match-indices~="${currentContentFindIndex}"]`
+            ).forEach(element => element.classList.add('content-find-current'));
+          }
+        }
+
+        function revealCurrentContentFindMatch() {
+          const rect = contentFindRangeRect(contentFindRanges[currentContentFindIndex]);
+          if (!rect) return;
+          const inset = 20;
+          if (rect.top >= inset && rect.bottom <= window.innerHeight - inset) return;
+          const adjustment = rect.top + rect.height * 0.5 - window.innerHeight * 0.5;
+          window.scrollBy({ top: adjustment, behavior: 'auto' });
+        }
+
+        window.setContentFindQuery = query => {
+          currentContentFindQuery = String(query || '');
+          contentFindRanges.splice(
+            0,
+            contentFindRanges.length,
+            ...rangesForContentFind(currentContentFindQuery)
+          );
+          currentContentFindIndex = initialContentFindIndex();
+          redrawContentFindHighlights();
+          revealCurrentContentFindMatch();
+          return contentFindResult();
+        };
+
+        window.navigateContentFindBy = delta => {
+          const count = contentFindRanges.length;
+          if (!count) return contentFindResult();
+          const step = Math.trunc(Number(delta) || 0);
+          if (!step) return contentFindResult();
+          const previousIndex = currentContentFindIndex;
+          const origin = currentContentFindIndex < 0
+            ? (step > 0 ? -1 : 0)
+            : currentContentFindIndex;
+          currentContentFindIndex = ((origin + step) % count + count) % count;
+          updateContentFindActiveState(previousIndex);
+          revealCurrentContentFindMatch();
+          return contentFindResult();
+        };
+
+        window.navigateContentFind = direction =>
+          window.navigateContentFindBy(direction === 'previous' ? -1 : 1);
+
         function addMarker(block, item, lineRect) {
           const marker = document.createElement('button');
           const isMuted = item.status === 'muted';
@@ -320,8 +524,10 @@ private enum HTMLPage {
           if (!lineRect) return;
           const documentRect = rectInDocument(root.getBoundingClientRect());
           const documentLineRect = rectInDocument(lineRect);
+          const rowTop = documentLineRect.top + (documentLineRect.height - 24) / 2;
+          marker.dataset.rowTop = String(rowTop);
           marker.style.left = (documentRect.left - 38) + 'px';
-          marker.style.top = (documentLineRect.top + (documentLineRect.height - 24) / 2) + 'px';
+          marker.style.top = rowTop + 'px';
         }
 
         function positionMarkers() {
@@ -417,6 +623,7 @@ private enum HTMLPage {
           layer.id = 'review-outline-layer';
           document.body.appendChild(layer);
           redrawOutlines();
+          reconcileContentFindMarkerCollisions();
         }
 
         window.setAnnotations = (annotations, selectedID) => {
@@ -452,7 +659,10 @@ private enum HTMLPage {
           if (!isRestoringPreviewViewport) beginViewportReflow(true);
           document.documentElement.style.setProperty('--markdown-font-scale', normalized);
           if (isRestoringPreviewViewport) {
-            window.requestAnimationFrame(redrawOutlines);
+            window.requestAnimationFrame(() => {
+              redrawOutlines();
+              redrawContentFindHighlights();
+            });
           } else {
             scheduleViewportReflowAdjustment();
           }
@@ -545,6 +755,7 @@ private enum HTMLPage {
               reflowAdjustmentFrame = null;
               preserveViewportAnchor(reflowViewportAnchor);
               redrawOutlines();
+              redrawContentFindHighlights();
             });
           }
 
@@ -555,6 +766,7 @@ private enum HTMLPage {
               if (generation !== reflowGeneration) return;
               preserveViewportAnchor(reflowViewportAnchor);
               redrawOutlines();
+              redrawContentFindHighlights();
               window.requestAnimationFrame(() => {
                 if (generation !== reflowGeneration) return;
                 isPreservingReflowViewport = false;

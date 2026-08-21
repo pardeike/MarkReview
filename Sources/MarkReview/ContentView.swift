@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 private extension Color {
-    static var reviewAccent: Color {
-        Color(nsColor: SystemAccentPalette.current.nsColor)
+    static func reviewAccent(_ palette: AppColorPalette) -> Color {
+        Color(nsColor: palette.nsColor)
     }
 }
 
@@ -39,11 +39,21 @@ private struct SidebarResizeHandle: View {
     }
 }
 
-private struct ReviewTextEditor: NSViewRepresentable {
+enum ReviewCommentEscapeAction: Equatable {
+    case deselect
+    case remove
+
+    static func action(for comment: String) -> Self {
+        comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .remove : .deselect
+    }
+}
+
+struct ReviewTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let focusToken: Int
     let accessibilityLabel: String
+    let onEscape: () -> Void
 
     private final class FocusableTextView: NSTextView {
         var shouldBecomeFirstResponder = false
@@ -92,6 +102,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.setAccessibilityLabel(accessibilityLabel)
+        textView.setAccessibilityHelp("Press Escape to leave this comment. Empty comments are removed.")
 
         scrollView.documentView = textView
         return scrollView
@@ -101,6 +112,7 @@ private struct ReviewTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? FocusableTextView else { return }
         textView.setAccessibilityLabel(accessibilityLabel)
+        textView.setAccessibilityHelp("Press Escape to leave this comment. Empty comments are removed.")
         if textView.string != text {
             textView.string = text
         }
@@ -134,6 +146,203 @@ private struct ReviewTextEditor: NSViewRepresentable {
         func textDidEndEditing(_ notification: Notification) {
             parent.isFocused = false
         }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+            parent.onEscape()
+            return true
+        }
+    }
+}
+
+private struct DocumentFindField: NSViewRepresentable {
+    @Binding var text: String
+    let focusToken: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+    let onClose: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let searchField = NSSearchField()
+        searchField.delegate = context.coordinator
+        searchField.target = context.coordinator
+        searchField.action = #selector(Coordinator.searchFieldChanged(_:))
+        searchField.placeholderString = "Find in Document"
+        searchField.sendsSearchStringImmediately = true
+        searchField.sendsWholeSearchString = false
+        searchField.setAccessibilityLabel("Find in document")
+        return searchField
+    }
+
+    func updateNSView(_ searchField: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+        if searchField.stringValue != text {
+            searchField.stringValue = text
+        }
+        guard context.coordinator.lastFocusToken != focusToken else { return }
+        context.coordinator.lastFocusToken = focusToken
+        DispatchQueue.main.async { [weak searchField] in
+            guard let searchField, let window = searchField.window else { return }
+            window.makeFirstResponder(searchField)
+            searchField.selectText(nil)
+        }
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: DocumentFindField
+        var lastFocusToken: Int?
+
+        init(_ parent: DocumentFindField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let searchField = notification.object as? NSSearchField else { return }
+            parent.text = searchField.stringValue
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                    parent.onPrevious()
+                } else {
+                    parent.onNext()
+                }
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                parent.onClose()
+                return true
+            default:
+                return false
+            }
+        }
+
+        @objc func searchFieldChanged(_ sender: NSSearchField) {
+            parent.text = sender.stringValue
+        }
+    }
+}
+
+private struct ReviewColorChooser: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedColor: AppColorPalette
+
+    let onApply: (AppColorPalette) -> Void
+
+    init(initialColor: AppColorPalette, onApply: @escaping (AppColorPalette) -> Void) {
+        _selectedColor = State(initialValue: initialColor)
+        self.onApply = onApply
+    }
+
+    private var customColor: Binding<Color> {
+        Binding(
+            get: { Color(nsColor: selectedColor.nsColor) },
+            set: { selectedColor = AppColorPalette(nsColor: NSColor($0)) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Review Color")
+                    .font(.title2.weight(.semibold))
+                Text("Choose the color used for review markers, outlines, and selected comments.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 17) {
+                ForEach(ReviewColorPreset.allCases) { preset in
+                    presetButton(preset)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            ColorPicker("Custom Color…", selection: customColor, supportsOpacity: false)
+                .accessibilityLabel("Custom review color")
+
+            Divider()
+
+            HStack {
+                previewBadge
+                Text("Review marker preview")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") {
+                    NSColorPanel.shared.close()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Set Color") {
+                    onApply(selectedColor)
+                    NSColorPanel.shared.close()
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 440)
+        .onExitCommand {
+            NSColorPanel.shared.close()
+            dismiss()
+        }
+        .onDisappear {
+            NSColorPanel.shared.close()
+        }
+    }
+
+    private func presetButton(_ preset: ReviewColorPreset) -> some View {
+        let selected = selectedColor == preset.palette
+        return Button {
+            selectedColor = preset.palette
+        } label: {
+            VStack(spacing: 6) {
+                Circle()
+                    .fill(Color(nsColor: preset.palette.nsColor))
+                    .frame(width: 32, height: 32)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.7), lineWidth: 1)
+                            .padding(2)
+                    }
+                    .overlay {
+                        Circle()
+                            .stroke(selected ? Color.primary : Color.clear, lineWidth: 2)
+                            .padding(-4)
+                    }
+                Text(preset.title)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(preset.title) review color")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var previewBadge: some View {
+        Text("1")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(nsColor: selectedColor.contrastingNSColor))
+            .frame(width: 24, height: 24)
+            .background(Color(nsColor: selectedColor.nsColor), in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(Color(nsColor: selectedColor.nsColor).opacity(0.35), lineWidth: 3)
+                    .padding(-3)
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -146,6 +355,7 @@ struct ContentView: View {
     private static let defaultPreviewFontScale = CGFloat(MarkReviewDocument.defaultPreviewFontScale)
 
     @ObservedObject var document: MarkReviewDocument
+    @ObservedObject var reviewColorStore: ReviewColorStore
     private let fileURL: URL?
     @State private var documentRevision = 0
     @State private var draftRegion: SelectedRegion?
@@ -163,6 +373,16 @@ struct ContentView: View {
     @State private var isSidebarVisible: Bool
     @State private var previewFontScale: CGFloat
     @State private var previewContentNonce: String
+    @State private var isFindBarVisible = false
+    @State private var findQuery = ""
+    @State private var findResult = PreviewFindResult.empty
+    @State private var isFindResultPending = false
+    @State private var findFocusToken = 0
+    @State private var findNavigationOffset = 0
+    @State private var findNavigationRequest: PreviewFindNavigationRequest?
+    @State private var nextPreviewActivationToken = 0
+    @State private var previewActivationRequest: PreviewActivationRequest?
+    @State private var isReviewColorChooserVisible = false
 
     private let renderer = MarkdownRenderer()
 
@@ -171,8 +391,9 @@ struct ContentView: View {
         case annotation(UUID)
     }
 
-    init(document: MarkReviewDocument, fileURL: URL?) {
+    init(document: MarkReviewDocument, fileURL: URL?, reviewColorStore: ReviewColorStore) {
         self.document = document
+        self.reviewColorStore = reviewColorStore
         self.fileURL = fileURL
         let hasMarkdown = !document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldShowForDocumentType = !Self.isMarkdownOnly(fileURL) || !document.annotations.isEmpty
@@ -198,6 +419,12 @@ struct ContentView: View {
             renumberAnnotations: renumberAnnotations,
             toggleSidebar: toggleSidebar,
             isSidebarVisible: isSidebarVisible,
+            showFind: showFind,
+            findNext: findNext,
+            findPrevious: findPrevious,
+            canFind: !document.originalMarkdown.isEmpty,
+            canNavigateFind: canNavigateFind,
+            showReviewColorChooser: { isReviewColorChooserVisible = true },
             zoomInPreview: zoomInPreview,
             zoomOutPreview: zoomOutPreview,
             resetPreviewZoom: resetPreviewZoom,
@@ -209,39 +436,56 @@ struct ContentView: View {
             if document.originalMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 emptyState
             } else {
-                HStack(spacing: 0) {
-                    PreviewWebView(
-                        html: renderer.render(
-                            document.originalMarkdown,
-                            contentNonce: previewContentNonce
-                        ),
-                        fontScale: previewFontScale,
-                        scrollPosition: document.previewScrollPosition,
-                        annotations: previewAnnotations,
-                        onRegion: handleRegion,
-                        onFocusAnnotation: selectAnnotationFromPreview,
-                        onScrollPositionChange: updatePreviewScrollPosition,
-                        selectedAnnotationID: selectedAnnotationID,
-                        focusRequest: previewFocusRequest,
-                        onFontScaleChange: updatePreviewFontScale
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    if isFindBarVisible {
+                        findBar
+                        Divider()
+                    }
 
-                    if isSidebarVisible {
-                        SidebarResizeHandle()
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let startWidth = sidebarDragStartWidth ?? sidebarWidth
-                                        sidebarDragStartWidth = startWidth
-                                        sidebarWidth = min(max(startWidth - value.translation.width, 280), 560)
-                                    }
-                                    .onEnded { _ in
-                                        sidebarDragStartWidth = nil
-                                    }
-                            )
-                        sidebar
-                            .frame(width: sidebarWidth)
+                    HStack(spacing: 0) {
+                        PreviewWebView(
+                            html: renderer.render(
+                                document.originalMarkdown,
+                                contentNonce: previewContentNonce,
+                                reviewColor: reviewColorStore.palette
+                            ),
+                            fontScale: previewFontScale,
+                            scrollPosition: document.previewScrollPosition,
+                            annotations: previewAnnotations,
+                            findQuery: isFindBarVisible ? findQuery : "",
+                            findNavigationRequest: isFindBarVisible ? findNavigationRequest : nil,
+                            previewActivationRequest: previewActivationRequest,
+                            isFindBarVisible: isFindBarVisible,
+                            onRegion: handleRegion,
+                            onFocusAnnotation: selectAnnotationFromPreview,
+                            onScrollPositionChange: updatePreviewScrollPosition,
+                            selectedAnnotationID: selectedAnnotationID,
+                            focusRequest: previewFocusRequest,
+                            onFontScaleChange: updatePreviewFontScale,
+                            onShowFind: showFind,
+                            onFindNext: findNext,
+                            onFindPrevious: findPrevious,
+                            onCloseFind: closeFind,
+                            onFindResult: updateFindResult
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        if isSidebarVisible {
+                            SidebarResizeHandle()
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let startWidth = sidebarDragStartWidth ?? sidebarWidth
+                                            sidebarDragStartWidth = startWidth
+                                            sidebarWidth = min(max(startWidth - value.translation.width, 280), 560)
+                                        }
+                                        .onEnded { _ in
+                                            sidebarDragStartWidth = nil
+                                        }
+                                )
+                            sidebar
+                                .frame(width: sidebarWidth)
+                        }
                     }
                 }
             }
@@ -258,6 +502,11 @@ struct ContentView: View {
             prepareForSave: prepareDraftForSave,
             actions: windowActions
         ))
+        .sheet(isPresented: $isReviewColorChooserVisible) {
+            ReviewColorChooser(initialColor: reviewColorStore.palette) { color in
+                reviewColorStore.set(color)
+            }
+        }
         .onChange(of: focusedComment) { _, focus in
             switch focus {
             case .draft:
@@ -284,6 +533,92 @@ struct ContentView: View {
             comment: draftComment
         )
         return document.annotations + [draft]
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 7) {
+            Spacer(minLength: 12)
+
+            DocumentFindField(
+                text: Binding(get: { findQuery }, set: updateFindQuery),
+                focusToken: findFocusToken,
+                onNext: findNext,
+                onPrevious: findPrevious,
+                onClose: closeFind
+            )
+            .frame(width: 280)
+
+            Text(findStatusText)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .frame(minWidth: 78, alignment: .trailing)
+                .accessibilityLabel("Find results")
+                .accessibilityValue(findStatusText)
+
+            findBarButton(
+                systemName: "chevron.up",
+                label: "Previous Match",
+                help: "Previous Match (⇧⌘G)",
+                action: findPrevious
+            )
+            .disabled(!canNavigateFind)
+
+            findBarButton(
+                systemName: "chevron.down",
+                label: "Next Match",
+                help: "Next Match (⌘G)",
+                action: findNext
+            )
+            .disabled(!canNavigateFind)
+
+            findBarButton(
+                systemName: "xmark",
+                label: "Close Find Bar",
+                help: "Close Find Bar (Esc)",
+                action: closeFind
+            )
+
+            Spacer(minLength: 12)
+        }
+        .padding(.vertical, 7)
+        .background(.bar)
+    }
+
+    private func findBarButton(
+        systemName: String,
+        label: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(label)
+        .help(help)
+    }
+
+    private var findStatusText: String {
+        if isFindResultPending {
+            return "Searching…"
+        }
+        guard !findQuery.isEmpty,
+              findResult.query == findQuery,
+              findResult.matchCount > 0 else { return "0 matches" }
+        guard let activeMatchIndex = findResult.activeMatchIndex else {
+            return "\(findResult.matchCount) matches"
+        }
+        return "\(activeMatchIndex + 1) of \(findResult.matchCount)"
+    }
+
+    private var canNavigateFind: Bool {
+        isFindBarVisible
+            && !isFindResultPending
+            && findResult.query == findQuery
+            && findResult.matchCount > 0
     }
 
     private var sidebar: some View {
@@ -356,12 +691,15 @@ struct ContentView: View {
                 onFocus: {
                     updateSelectedAnnotation(id)
                     requestPreviewFocus(id)
+                },
+                onEscape: {
+                    dismissCommentEditor(.draft, comment: draftComment)
                 }
             )
         }
         .padding(11)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewAccent.opacity(0.32), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.reviewAccent(reviewColorStore.palette).opacity(0.32), lineWidth: 1))
         .contentShape(Rectangle())
         .id("draft-\(id.uuidString)")
         .onTapGesture { selectDraft(id: id) }
@@ -390,6 +728,10 @@ struct ContentView: View {
                 onFocus: {
                     updateSelectedAnnotation(value.id)
                     requestPreviewFocus(value.id)
+                },
+                onEscape: {
+                    let comment = document.annotations.first(where: { $0.id == value.id })?.comment ?? value.comment
+                    dismissCommentEditor(.annotation(value.id), comment: comment)
                 }
             )
             HStack(spacing: 6) {
@@ -408,7 +750,7 @@ struct ContentView: View {
         }
         .padding(11)
         .background(Color.secondary.opacity(isMuted ? 0.035 : 0.07), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewAccent.opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selectedAnnotationID == value.id ? Color.reviewAccent(reviewColorStore.palette).opacity(0.42) : Color.secondary.opacity(0.12), lineWidth: 1))
         .contentShape(Rectangle())
         .id("annotation-\(value.id.uuidString)")
         .onTapGesture { selectAnnotation(value.id) }
@@ -417,13 +759,13 @@ struct ContentView: View {
     private func numberBadge(_ number: Int, selected: Bool, muted: Bool = false) -> some View {
         Text(String(number))
             .font(.caption.weight(.bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(muted ? Color.white : Color(nsColor: reviewColorStore.palette.contrastingNSColor))
             .frame(width: 24, height: 24)
-            .background(muted ? Color.secondary : (selected ? Color.reviewAccent : Color.reviewAccent.opacity(0.45)), in: Circle())
+            .background(muted ? Color.secondary : (selected ? Color.reviewAccent(reviewColorStore.palette) : Color.reviewAccent(reviewColorStore.palette).opacity(0.45)), in: Circle())
             .overlay {
                 if selected {
                     Circle()
-                        .stroke(Color.reviewAccent.opacity(0.35), lineWidth: 3)
+                        .stroke(Color.reviewAccent(reviewColorStore.palette).opacity(0.35), lineWidth: 3)
                         .padding(-3)
                 }
             }
@@ -436,7 +778,8 @@ struct ContentView: View {
         focus: CommentFocus,
         focusToken: Int,
         accessibilityLabel: String,
-        onFocus: @escaping () -> Void
+        onFocus: @escaping () -> Void,
+        onEscape: @escaping () -> Void
     ) -> some View {
         let editorFocus = Binding<Bool>(
             get: { focusedComment == focus },
@@ -462,7 +805,8 @@ struct ContentView: View {
                 text: text,
                 isFocused: editorFocus,
                 focusToken: focusToken,
-                accessibilityLabel: accessibilityLabel
+                accessibilityLabel: accessibilityLabel,
+                onEscape: onEscape
             )
                 .padding(8)
                 .frame(minHeight: 66, maxHeight: 120)
@@ -715,6 +1059,34 @@ struct ContentView: View {
         sidebarScrollRequest = SidebarScrollRequest(id: id, anchor: .top)
     }
 
+    private func dismissCommentEditor(_ focus: CommentFocus, comment: String) {
+        focusedComment = nil
+
+        switch (focus, ReviewCommentEscapeAction.action(for: comment)) {
+        case (.draft, .remove):
+            let removedDraftID = draftID
+            updateSelectedAnnotation(nil)
+            draftRegion = nil
+            draftID = nil
+            draftComment = ""
+            if pendingBottomScrollID == removedDraftID {
+                pendingBottomScrollID = nil
+            }
+            if sidebarScrollRequest?.id == removedDraftID {
+                sidebarScrollRequest = nil
+            }
+        case (.draft, .deselect):
+            updateSelectedAnnotation(nil)
+        case (.annotation(let id), .remove):
+            selectedAnnotationID = nil
+            removeAnnotation(id: id)
+        case (.annotation, .deselect):
+            updateSelectedAnnotation(nil)
+        }
+
+        activatePreview()
+    }
+
     private func renumberAnnotations() {
         mutateDocument { document in
             document.renumberTopDown()
@@ -759,6 +1131,64 @@ struct ContentView: View {
 
     private func toggleSidebar() {
         isSidebarVisible.toggle()
+    }
+
+    private func showFind() {
+        guard !document.originalMarkdown.isEmpty else { return }
+        let wasVisible = isFindBarVisible
+        isFindBarVisible = true
+        findFocusToken &+= 1
+        if !wasVisible, !findQuery.isEmpty {
+            isFindResultPending = true
+        }
+    }
+
+    private func closeFind() {
+        guard isFindBarVisible else { return }
+        isFindBarVisible = false
+        isFindResultPending = false
+        findResult = .empty
+        findNavigationOffset = 0
+        findNavigationRequest = nil
+        activatePreview()
+    }
+
+    private func activatePreview() {
+        nextPreviewActivationToken &+= 1
+        previewActivationRequest = PreviewActivationRequest(token: nextPreviewActivationToken)
+    }
+
+    private func updateFindQuery(_ value: String) {
+        guard findQuery != value else { return }
+        findQuery = value
+        findResult = PreviewFindResult(query: value, matchCount: 0, activeMatchIndex: nil)
+        isFindResultPending = !value.isEmpty
+        findNavigationOffset = 0
+        findNavigationRequest = nil
+    }
+
+    private func updateFindResult(_ result: PreviewFindResult) {
+        guard isFindBarVisible, result.query == findQuery else { return }
+        findResult = result
+        isFindResultPending = false
+    }
+
+    private func findNext() {
+        navigateFind(.next)
+    }
+
+    private func findPrevious() {
+        navigateFind(.previous)
+    }
+
+    private func navigateFind(_ direction: PreviewFindDirection) {
+        guard isFindBarVisible else {
+            showFind()
+            return
+        }
+        guard canNavigateFind else { return }
+        findNavigationOffset &+= direction == .next ? 1 : -1
+        findNavigationRequest = PreviewFindNavigationRequest(offset: findNavigationOffset)
     }
 
     private var canZoomInPreview: Bool {

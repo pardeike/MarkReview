@@ -7,6 +7,12 @@ struct MarkReviewActions {
     let renumberAnnotations: () -> Void
     let toggleSidebar: () -> Void
     let isSidebarVisible: Bool
+    let showFind: () -> Void
+    let findNext: () -> Void
+    let findPrevious: () -> Void
+    let canFind: Bool
+    let canNavigateFind: Bool
+    let showReviewColorChooser: () -> Void
     let zoomInPreview: () -> Void
     let zoomOutPreview: () -> Void
     let resetPreviewZoom: () -> Void
@@ -135,7 +141,38 @@ struct MarkReviewCommands: Commands {
             .disabled(target == nil)
         }
 
+        CommandGroup(after: .pasteboard) {
+            Menu("Find") {
+                Button("Find…") {
+                    MarkReviewWindowActions.resolve(actions)?.showFind()
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                .disabled(target == nil || target?.canFind == false)
+
+                Divider()
+
+                Button("Find Next") {
+                    MarkReviewWindowActions.resolve(actions)?.findNext()
+                }
+                .keyboardShortcut("g", modifiers: [.command])
+                .disabled(target == nil || target?.canNavigateFind == false)
+
+                Button("Find Previous") {
+                    MarkReviewWindowActions.resolve(actions)?.findPrevious()
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(target == nil || target?.canNavigateFind == false)
+            }
+        }
+
         CommandMenu("Review") {
+            Button("Set Review Color…") {
+                MarkReviewWindowActions.resolve(actions)?.showReviewColorChooser()
+            }
+            .disabled(target == nil)
+
+            Divider()
+
             Button("Renumber Comments") {
                 MarkReviewWindowActions.resolve(actions)?.renumberAnnotations()
             }
@@ -214,10 +251,15 @@ final class MarkReviewAppDelegate: NSObject, NSApplicationDelegate {
 struct MarkReviewApp: App {
     @NSApplicationDelegateAdaptor(MarkReviewAppDelegate.self) private var appDelegate
     @StateObject private var recentDocuments = RecentDocumentsStore()
+    @StateObject private var reviewColorStore = ReviewColorStore()
 
     var body: some Scene {
         DocumentGroup(newDocument: { MarkReviewDocument() }) { file in
-            ContentView(document: file.document, fileURL: file.fileURL)
+            ContentView(
+                document: file.document,
+                fileURL: file.fileURL,
+                reviewColorStore: reviewColorStore
+            )
         }
         .commands { MarkReviewCommands(recentDocuments: recentDocuments) }
     }

@@ -13,6 +13,33 @@ func recentDocumentsDeferInitialLoad() {
     #expect(store.urls.isEmpty)
 }
 
+@Test("Escape deselects comments and removes only blank ones")
+func escapeUsesCommentContentToChooseItsAction() {
+    #expect(ReviewCommentEscapeAction.action(for: "Keep this comment") == .deselect)
+    #expect(ReviewCommentEscapeAction.action(for: "") == .remove)
+    #expect(ReviewCommentEscapeAction.action(for: " \n\t ") == .remove)
+}
+
+@Test("review editors handle Escape without consuming ordinary text commands")
+@MainActor
+func reviewEditorsHandleEscapeAsACommentExit() {
+    var escapeCount = 0
+    let editor = ReviewTextEditor(
+        text: .constant("Comment"),
+        isFocused: .constant(true),
+        focusToken: 1,
+        accessibilityLabel: "Review comment",
+        onEscape: { escapeCount += 1 }
+    )
+    let coordinator = editor.makeCoordinator()
+    let textView = NSTextView()
+
+    #expect(coordinator.textView(textView, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+    #expect(escapeCount == 1)
+    #expect(!coordinator.textView(textView, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+    #expect(escapeCount == 1)
+}
+
 @Test("review document round-trips with annotations")
 func documentRoundTrip() throws {
     let annotation = ReviewAnnotation(
@@ -506,6 +533,91 @@ func previewZoomInputs() {
     #expect(!PreviewZoomInput.usesScrollZoom(modifiers: []))
 }
 
+@Test("preview find inputs use standard document search shortcuts")
+func previewFindInputs() {
+    #expect(PreviewFindInput.keyCommand(
+        charactersIgnoringModifiers: "f",
+        modifiers: [.command]
+    ) == .show)
+    #expect(PreviewFindInput.keyCommand(
+        charactersIgnoringModifiers: "g",
+        modifiers: [.command]
+    ) == .next)
+    #expect(PreviewFindInput.keyCommand(
+        charactersIgnoringModifiers: "g",
+        modifiers: [.command, .shift]
+    ) == .previous)
+    #expect(PreviewFindInput.keyCommand(
+        charactersIgnoringModifiers: "f",
+        modifiers: [.command, .option]
+    ) == nil)
+    #expect(PreviewFindInput.keyCommand(
+        charactersIgnoringModifiers: "f",
+        modifiers: []
+    ) == nil)
+}
+
+@Test("preview find results validate the active occurrence")
+func previewFindResultsValidateActiveOccurrence() {
+    let result = PreviewWebView.Coordinator.parseFindResult([
+        "query": "method",
+        "count": 4,
+        "activeIndex": 2
+    ])
+    let missingActiveResult = PreviewWebView.Coordinator.parseFindResult([
+        "query": "method",
+        "count": 4,
+        "activeIndex": 7
+    ])
+
+    #expect(result == PreviewFindResult(query: "method", matchCount: 4, activeMatchIndex: 2))
+    #expect(missingActiveResult == PreviewFindResult(query: "method", matchCount: 4, activeMatchIndex: nil))
+    #expect(PreviewWebView.Coordinator.parseFindResult(["query": "method"]) == nil)
+}
+
+@Test("preview finds rendered content without rewriting the Markdown DOM")
+func previewFindsRenderedContentWithoutRewritingDOM() {
+    let rendered = MarkdownRenderer().render("Method one. Method two.")
+
+    #expect(rendered.contains("function searchableTextIndex()"))
+    #expect(rendered.contains("function rangesForContentFind(query)"))
+    #expect(rendered.contains("window.setContentFindQuery = query"))
+    #expect(rendered.contains("window.navigateContentFind = direction"))
+    #expect(rendered.contains("window.navigateContentFindBy = delta"))
+    #expect(rendered.contains("id = 'content-find-layer'"))
+    #expect(rendered.contains("id = 'content-find-marker-layer'"))
+    #expect(rendered.contains("marker.textContent = '!'"))
+    #expect(rendered.contains("row.matchIndices.includes(currentContentFindIndex)"))
+    #expect(rendered.contains("sameRowReviewMarkers"))
+    #expect(rendered.contains("--find-offset"))
+    #expect(rendered.contains("marker.style.setProperty('--find-offset', '10px')"))
+    #expect(rendered.contains("function reconcileContentFindMarkerCollisions()"))
+    #expect(rendered.contains("content-find-current"))
+    #expect(rendered.contains("redrawContentFindHighlights()"))
+    #expect(rendered.contains("function updateContentFindActiveState(previousIndex)"))
+    #expect(rendered.contains("updateContentFindActiveState(previousIndex);"))
+    #expect(rendered.contains("document.createElement('mark')") == false)
+}
+
+@Test("rapid find navigation keeps every coalesced step")
+func rapidFindNavigationKeepsEveryStep() {
+    let coordinator = PreviewWebView.Coordinator(
+        onRegion: { _ in },
+        onFocusAnnotation: { _ in },
+        onScrollPositionChange: { _, _ in },
+        onFontScaleChange: { _, _ in }
+    )
+    coordinator.appliedFindNavigationOffset = 2
+    coordinator.pendingFindNavigationRequest = PreviewFindNavigationRequest(offset: 7)
+
+    #expect(coordinator.pendingFindNavigationDelta == 5)
+
+    coordinator.appliedFindNavigationOffset = 7
+    coordinator.pendingFindNavigationRequest = PreviewFindNavigationRequest(offset: 3)
+
+    #expect(coordinator.pendingFindNavigationDelta == -4)
+}
+
 @Test("precise scroll zoom follows every gesture update proportionally")
 func preciseScrollZoomIsContinuous() {
     #expect(PreviewZoomInput.preciseScrollSteps(for: 0.25) > 0)
@@ -607,16 +719,37 @@ func previewStacksSameRowReviewMarkersForHoverInspection() {
     #expect(rendered.contains("z-index: 100"))
 }
 
-@Test("preview review colors come from the macOS accent color")
-func previewUsesSystemAccentColor() {
-    let rendered = MarkdownRenderer().render("# Review")
-    let accent = SystemAccentPalette.current
+@Test("preview keeps configured review color separate from the macOS tint color")
+func previewSeparatesReviewAndFindColors() {
+    let reviewColor = ReviewColorPreset.purple.palette
+    let findColor = AppColorPalette.systemAccent
+    let rendered = MarkdownRenderer().render("# Review", reviewColor: reviewColor)
 
-    #expect(rendered.contains(accent.cssRGBA(alpha: 0.45)))
-    #expect(rendered.contains(accent.cssRGBA(alpha: 0.82)))
-    #expect(rendered.contains(accent.cssRGBA()))
-    #expect(!rendered.contains("#60a5fa"))
-    #expect(!rendered.contains("rgba(0, 122, 255"))
+    #expect(rendered.contains(reviewColor.cssRGBA(alpha: 0.45)))
+    #expect(rendered.contains(reviewColor.cssRGBA(alpha: 0.82)))
+    #expect(rendered.contains(reviewColor.cssRGBA()))
+    #expect(rendered.contains("background: \(findColor.cssRGBA(alpha: 0.22))"))
+    #expect(rendered.contains("box-shadow: 0 0 0 2px \(findColor.cssRGBA(alpha: 0.82))"))
+    #expect(rendered.contains("accent-color: \(findColor.cssRGBA())"))
+    #expect(!rendered.contains("__REVIEW_ACCENT_"))
+    #expect(!rendered.contains("__FIND_ACCENT_"))
+}
+
+@Test("review color preference defaults to orange and persists custom colors")
+@MainActor
+func reviewColorPreferencePersists() throws {
+    let suiteName = "MarkReviewTests.reviewColor.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let initialStore = ReviewColorStore(defaults: defaults)
+    #expect(initialStore.palette == ReviewColorPreset.orange.palette)
+
+    let customColor = AppColorPalette(red: 0.12, green: 0.34, blue: 0.56)
+    initialStore.set(customColor)
+
+    #expect(initialStore.palette == customColor)
+    #expect(ReviewColorStore(defaults: defaults).palette == customColor)
 }
 
 @Test("preview confines executable content to MarkReview's nonce")
