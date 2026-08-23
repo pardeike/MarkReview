@@ -60,23 +60,23 @@ private enum HTMLPage {
         :root { --markdown-font-scale: 1; color-scheme: light dark; }
         * { box-sizing: border-box; }
         body { position: relative; margin: 0; padding: 38px 54px 72px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: calc(16px * var(--markdown-font-scale)); line-height: 1.58; color: #202124; background: #fff; }
-        @media (prefers-color-scheme: dark) { body { color: #f1f3f4; background: #202124; } a { color: #8ab4f8; } code { background: #303134; color: #f8fafc; } pre, pre code { background: #111827; color: #f8fafc; } blockquote { border-color: #777; color: #c5c7c9; } }
         #document { max-width: 56.25em; margin: 0 auto; }
         h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 1.5em 0 .55em; letter-spacing: -.015em; }
         h1 { font-size: 2em; } h2 { font-size: 1.55em; } h3 { font-size: 1.25em; }
         p, ul, ol, blockquote, pre, table { margin: .8em 0; }
         ul, ol { padding-left: 1.6em; } li { margin: .25em 0; }
         blockquote { border-left: 4px solid #c9cdd2; padding-left: 1em; color: #5f6368; }
-        code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; color: #1f2937; background: #eef2f7; padding: .12em .3em; border-radius: 4px; }
-        pre { max-width: 100%; padding: 14px 16px; overflow-x: auto; border-radius: 8px; background: #eef2f7; color: #1f2937; }
+        code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: .9em; font-weight: 400; color: #3c4043; background: #eef0f2; padding: .12em .3em; border-radius: 4px; }
+        pre { max-width: 100%; padding: 14px 16px; overflow-x: auto; border-radius: 8px; background: #f4f5f6; color: #3c4043; line-height: 1.52; }
         pre > code { display: block; width: max-content; min-width: 100%; }
-        pre code { background: transparent; color: #1f2937; padding: 0; }
+        pre code { background: transparent; color: inherit; padding: 0; }
         table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid #c9cdd2; text-align: left; }
         a, :not(pre) > code { overflow-wrap: anywhere; }
         img { max-width: 100%; } hr { border: 0; border-top: 1px solid #c9cdd2; margin: 2em 0; }
         input[type="checkbox"] { font-size: inherit; width: .875em; height: .875em; margin: 0 .5em 0 0; vertical-align: -.125em; accent-color: __SYSTEM_ACCENT_SELECTED__; }
         ul > li:has(> input[type="checkbox"]) { list-style: none; }
         li > input[type="checkbox"] + p { display: inline; }
+        @media (prefers-color-scheme: dark) { body { color: #f1f3f4; background: #202124; } a { color: #8ab4f8; } code { background: #303134; color: #d3d6da; } pre { background: #292a2c; color: #d3d6da; } pre code { background: transparent; color: inherit; } blockquote { border-color: #777; color: #c5c7c9; } }
         #content-find-layer { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; }
         .content-find-highlight { position: absolute; border-radius: 3px; background: __FIND_ACCENT_MUTED__; box-shadow: inset 0 0 0 1px __FIND_ACCENT_OUTLINE__; }
         .content-find-highlight.content-find-current { background: __FIND_ACCENT_CURRENT__; box-shadow: 0 0 0 2px __FIND_ACCENT_RING__, inset 0 0 0 1px rgba(255, 255, 255, .28); }

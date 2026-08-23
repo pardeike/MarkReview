@@ -477,6 +477,27 @@ func wideMarkdownContentDoesNotWidenDocument() {
     #expect(rendered.contains("a, :not(pre) > code { overflow-wrap: anywhere; }"))
 }
 
+@Test("preview uses quiet code surfaces in light and dark appearances")
+func previewUsesQuietCodeSurfaces() {
+    let rendered = MarkdownRenderer().render("Use `inline` code.\n\n```swift\nlet answer = 42\n```")
+
+    let defaultCodeRule = rendered.range(
+        of: #"code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;"#
+    )
+    let darkAppearanceRule = rendered.range(of: "@media (prefers-color-scheme: dark)")
+
+    #expect(defaultCodeRule != nil)
+    #expect(darkAppearanceRule != nil)
+    if let defaultCodeRule, let darkAppearanceRule {
+        #expect(defaultCodeRule.upperBound < darkAppearanceRule.lowerBound)
+    }
+    #expect(rendered.contains("color: #3c4043; background: #eef0f2;"))
+    #expect(rendered.contains("background: #f4f5f6; color: #3c4043; line-height: 1.52;"))
+    #expect(rendered.contains("code { background: #303134; color: #d3d6da; }"))
+    #expect(rendered.contains("pre { background: #292a2c; color: #d3d6da; }"))
+    #expect(rendered.contains("pre code { background: transparent; color: inherit; padding: 0; }"))
+}
+
 @Test("preview escapes HTML-like code in fenced blocks and tables")
 func previewEscapesHTMLLikeCode() {
     let rendered = MarkdownRenderer().render(
